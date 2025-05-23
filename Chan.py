@@ -179,6 +179,14 @@ class CChan:
         elif self.data_src == DATA_SRC.CSV:
             from DataAPI.csvAPI import CSV_API
             _dict[DATA_SRC.CSV] = CSV_API
+        elif self.data_src == DATA_SRC.ALPHA_VANTAGE:
+            from DataAPI.AlphaVantageAPI import CAlphaVantage
+            _dict[DATA_SRC.ALPHA_VANTAGE] = CAlphaVantage
+        elif self.data_src == DATA_SRC.YAHOO_FINANCE:
+            from DataAPI.YahooFinanceAPI import CYahooFinance
+            _dict[DATA_SRC.YAHOO_FINANCE] = CYahooFinance
+
+
         if self.data_src in _dict:
             return _dict[self.data_src]
         assert isinstance(self.data_src, str)

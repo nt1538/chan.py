@@ -3,9 +3,11 @@ from typing import Literal
 
 
 class DATA_SRC(Enum):
+    ALPHA_VANTAGE = auto()
     BAO_STOCK = auto()
     CCXT = auto()
     CSV = auto()
+    YAHOO_FINANCE = auto()
 
 
 class KL_TYPE(Enum):
