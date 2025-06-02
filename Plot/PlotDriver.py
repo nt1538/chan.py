@@ -164,7 +164,12 @@ class CPlotDriver:
         self.lv_lst = chan.lv_list[:len(plot_metas)]
 
         x_range = self.GetRealXrange(figure_config, plot_metas[0])
-        plot_macd: Dict[KL_TYPE, bool] = {kl_type: conf.get("plot_macd", False) for kl_type, conf in plot_config.items()}
+        # plot_macd: Dict[KL_TYPE, bool] = {kl_type: conf.get("plot_macd", False) for kl_type, conf in plot_config.items()}
+        plot_macd: Dict[KL_TYPE, bool] = {
+            kl_type: (conf.get("plot_macd", False) or conf.get("plot_dmi", False))
+            for kl_type, conf in plot_config.items()
+        }
+
         self.figure, axes = create_figure(plot_macd, figure_config, self.lv_lst)
 
         sseg_begin = 0
@@ -258,6 +263,9 @@ class CPlotDriver:
         if plot_config.get("plot_macd", False):
             assert ax_macd is not None
             self.draw_macd(meta, ax_macd, x_limits, **plot_para.get('macd', {}))
+        if plot_config.get("plot_dmi", False):
+            assert ax_macd is not None
+            self.draw_dmi_adx(meta, ax_macd, x_limits, **plot_para.get('dmi', {}))
         if plot_config.get("plot_mean", False):
             self.draw_mean(meta, ax, **plot_para.get('mean', {}))
         if plot_config.get("plot_channel", False):
@@ -551,6 +559,23 @@ class CPlotDriver:
         for idx, macd in enumerate(macd_bar):
             if macd < 0:
                 _bar[idx].set_color("#006400")
+        ax.set_ylim(y_min, y_max)
+
+    def draw_dmi_adx(self, meta: CChanPlotMeta, ax: Axes, x_limits, width=0.4):
+        dmi_lst = [klu.dmi for klu in meta.klu_iter()]
+        assert dmi_lst[0] is not None, "you must compute dmi first"
+
+        x_begin = x_limits[0]
+        x_idx = range(len(dmi_lst))[x_begin:]
+        plus_di_line = [dmi.plus_di for dmi in dmi_lst[x_begin:]]
+        minus_di_line = [dmi.minus_di for dmi in dmi_lst[x_begin:]]
+        adx_line = [dmi.adx for dmi in dmi_lst[x_begin:]]
+
+        y_min = min(min(plus_di_line), min(minus_di_line), min(adx_line))
+        y_max = max(max(plus_di_line), max(minus_di_line), max(adx_line))
+        ax.plot(x_idx, plus_di_line, "#00ff00", label="+DI")
+        ax.plot(x_idx, minus_di_line, "#ff0000", label="-DI")
+        ax.plot(x_idx, adx_line, "#0000ff", label="ADX")
         ax.set_ylim(y_min, y_max)
 
     def draw_mean(self, meta: CChanPlotMeta, ax: Axes):

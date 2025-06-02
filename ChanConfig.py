@@ -10,6 +10,7 @@ from Math.Demark import CDemarkEngine
 from Math.KDJ import KDJ
 from Math.MACD import CMACD
 from Math.RSI import RSI
+from Math.DMI import DMI
 from Math.TrendModel import CTrendModel
 from Seg.SegConfig import CSegConfig
 from ZS.ZSConfig import CZSConfig
@@ -20,6 +21,14 @@ class CChanConfig:
         if conf is None:
             conf = {}
         conf = ConfigWithCheck(conf)
+        self.cal_dmi = conf.get("cal_dmi", False)
+        self.dmi_cycle = conf.get("dmi_cycle", 14)
+
+        self.cal_rsi = conf.get("cal_rsi", False)
+        self.rsi_cycle = conf.get("rsi_cycle", 14)
+
+        self.cal_kdj = conf.get("cal_kdj", False)
+        self.kdj_cycle = conf.get("kdj_cycle", 9)
         self.bi_conf = CBiConfig(
             bi_algo=conf.get("bi_algo", "normal"),
             is_strict=conf.get("bi_strict", True),
@@ -53,10 +62,6 @@ class CChanConfig:
         self.trend_metrics: List[int] = conf.get("trend_metrics", [])
         self.macd_config = conf.get("macd", {"fast": 12, "slow": 26, "signal": 9})
         self.cal_demark = conf.get("cal_demark", False)
-        self.cal_rsi = conf.get("cal_rsi", False)
-        self.cal_kdj = conf.get("cal_kdj", False)
-        self.rsi_cycle = conf.get("rsi_cycle", 14)
-        self.kdj_cycle = conf.get("kdj_cycle", 9)
         self.demark_config = conf.get("demark", {
             'demark_len': 9,
             'setup_bias': 4,
@@ -73,7 +78,7 @@ class CChanConfig:
         conf.check()
 
     def GetMetricModel(self):
-        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ] = [
+        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | DMI] = [
             CMACD(
                 fastperiod=self.macd_config['fast'],
                 slowperiod=self.macd_config['slow'],
@@ -100,6 +105,8 @@ class CChanConfig:
             res.append(RSI(self.rsi_cycle))
         if self.cal_kdj:
             res.append(KDJ(self.kdj_cycle))
+        if self.cal_dmi:
+            res.append(DMI(self.dmi_cycle))
         return res
 
     def set_bsp_config(self, conf):

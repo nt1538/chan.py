@@ -8,6 +8,7 @@ from Math.BOLL import BOLL_Metric, BollModel
 from Math.Demark import CDemarkEngine, CDemarkIndex
 from Math.KDJ import KDJ
 from Math.MACD import CMACD, CMACD_item
+from Math.DMI import CDMI  # Ensure DMI module is imported
 from Math.RSI import RSI
 from Math.TrendModel import CTrendModel
 
@@ -132,6 +133,8 @@ class CKLine_Unit:
                 self.rsi = metric_model.add(self.close)
             elif isinstance(metric_model, KDJ):
                 self.kdj = metric_model.add(self.high, self.low, self.close)
+            elif isinstance(metric_model, CDMI):
+                self.dmi = metric_model.add(self.high, self.low, self.close)
 
     def get_parent_klc(self):
         assert self.sup_kl is not None
