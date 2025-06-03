@@ -580,19 +580,15 @@ class CPlotDriver:
         ax.plot(x_idx, adx_line, "#0000ff", label="ADX")
         ax.set_ylim(y_min, y_max)
 
-    def draw_rsl(self, meta, ax, color='blue'):
-        if meta.chan_metric is None:
-            return
-        if 'RSL' not in meta.chan_metric.metrics:
-            return
-        rsl_data = meta.chan_metric.metrics['RSL'].get_value()
-        if not rsl_data:
-            return
-        x = list(meta.kline.keys())
-        y = rsl_data
-        ax.plot(x, y, label="RSL", color=color)
-        ax.axhline(y=1.0, color='gray', linestyle='--', linewidth=0.5)
-        ax.legend()
+    def draw_rsl(
+        self,
+        meta: CChanPlotMeta,
+        ax,
+        color='purple',
+    ):
+        data = [klu.rsl for klu in meta.klu_iter()]
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        ax.plot(range(x_begin, x_end), data[x_begin:x_end], c=color)
 
     def draw_mean(self, meta: CChanPlotMeta, ax: Axes):
         mean_lst = [klu.trend[TREND_TYPE.MEAN] for klu in meta.klu_iter()]
