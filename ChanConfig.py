@@ -10,7 +10,7 @@ from Math.Demark import CDemarkEngine
 from Math.KDJ import KDJ
 from Math.MACD import CMACD
 from Math.RSI import RSI
-from Math.DMI import DMI
+from Math.DMI import CDMI
 from Math.TrendModel import CTrendModel
 from Seg.SegConfig import CSegConfig
 from ZS.ZSConfig import CZSConfig
@@ -106,7 +106,7 @@ class CChanConfig:
         if self.cal_kdj:
             res.append(KDJ(self.kdj_cycle))
         if self.cal_dmi:
-            res.append(DMI(self.dmi_cycle))
+            res.append(CDMI(self.dmi_cycle))
         return res
 
     def set_bsp_config(self, conf):
