@@ -4,13 +4,19 @@ from typing import Dict, Optional
 from Common.CEnum import DATA_FIELD, TRADE_INFO_LST, TREND_TYPE
 from Common.ChanException import CChanException, ErrCode
 from Common.CTime import CTime
+from Math.KeltnerChannel import KeltnerChannel
 from Math.BOLL import BOLL_Metric, BollModel
 from Math.Demark import CDemarkEngine, CDemarkIndex
 from Math.KDJ import KDJ
 from Math.MACD import CMACD, CMACD_item
 from Math.DMI import CDMI  # Ensure DMI module is imported
 from Math.RSI import RSI
+from Math.BollingerBands import BollingerBands
 from Math.RSL import RSL
+from Math.DemandIndex import DemandIndex
+from Math.ADLine import ADLine
+from Math.STARC import STARC
+
 from Math.TrendModel import CTrendModel
 
 from .TradeInfo import CTradeInfo
@@ -25,6 +31,7 @@ class CKLine_Unit:
         self.open = kl_dict[DATA_FIELD.FIELD_OPEN]
         self.high = kl_dict[DATA_FIELD.FIELD_HIGH]
         self.low = kl_dict[DATA_FIELD.FIELD_LOW]
+        self.volume = kl_dict[DATA_FIELD.FIELD_VOLUME]
 
         self.check(autofix)
 
@@ -55,6 +62,7 @@ class CKLine_Unit:
             DATA_FIELD.FIELD_OPEN: self.open,
             DATA_FIELD.FIELD_HIGH: self.high,
             DATA_FIELD.FIELD_LOW: self.low,
+            DATA_FIELD.FIELD_VOLUME: self.volume,
         }
         for metric in TRADE_INFO_LST:
             if metric in self.trade_info.metric:
@@ -71,6 +79,18 @@ class CKLine_Unit:
             obj.kdj = copy.deepcopy(self.kdj, memo)
         if hasattr(self, "rsl"):
             obj.rsl = copy.deepcopy(self.rsl, memo)
+        if hasattr(self, "dmi"):
+            obj.dmi = copy.deepcopy(self.dmi, memo)
+        if hasattr(self, "demand_index"):
+            obj.demand_index = copy.deepcopy(self.demand_index, memo)
+        if hasattr(self, "adline"):
+            obj.ad_line = copy.deepcopy(self.ad_line, memo)
+        if hasattr(self, "bollinger_bands"):
+            obj.bb_vals = copy.deepcopy(self.bb_vals, memo)
+        if hasattr(self, "keltner_channel"):
+            obj.kc_vals = copy.deepcopy(self.kc_vals, memo)
+        if hasattr(self, "STARC"):
+            obj.starc_vals = copy.deepcopy(self.starc_vals, memo)
         obj.set_idx(self.idx)
         memo[id(self)] = obj
         return obj
@@ -140,6 +160,31 @@ class CKLine_Unit:
                 self.kdj = metric_model.add(self.high, self.low, self.close)
             elif isinstance(metric_model, CDMI):
                 self.dmi = metric_model.add(self.high, self.low, self.close)
+            elif isinstance(metric_model, DemandIndex):
+                self.demand_index = metric_model.add(self.close, self.volume)
+            elif isinstance(metric_model, ADLine):
+                self.ad_line = metric_model.add(self.close, self.open, self.volume)
+            elif isinstance(metric_model, BollingerBands):
+                self.bb_vals = metric_model.add(self.close)
+                if self.bb_vals is not None:
+                    self.bb_upper, self.bb_middle, self.bb_lower = self.bb_vals
+                else:
+                    self.bb_upper = self.bb_middle = self.bb_lower = None
+            elif isinstance(metric_model, KeltnerChannel):
+                prev_close = self.pre.close if self.pre is not None else None
+                self.kc_vals = metric_model.add(self.high, self.low, self.close, prev_close)
+                if self.kc_vals is not None:
+                    self.kc_upper, self.kc_middle, self.kc_lower = self.kc_vals
+                else:
+                    self.kc_upper = self.kc_middle = self.kc_lower = None
+            elif isinstance(metric_model, STARC):
+                self.starc_vals = metric_model.add(self.high, self.low, self.close)
+                if self.starc_vals is not None:
+                    self.starc_upper, self.starc_middle, self.starc_lower = self.starc_vals
+                else:
+                    self.starc_upper = self.starc_middle = self.starc_lower = None
+
+
 
     def get_parent_klc(self):
         assert self.sup_kl is not None

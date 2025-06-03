@@ -5,13 +5,19 @@ from BuySellPoint.BSPointConfig import CBSPointConfig
 from Common.CEnum import TREND_TYPE
 from Common.ChanException import CChanException, ErrCode
 from Common.func_util import _parse_inf
+from Math.KeltnerChannel import KeltnerChannel
 from Math.BOLL import BollModel
+from Math.BollingerBands import BollingerBands
 from Math.Demark import CDemarkEngine
 from Math.KDJ import KDJ
 from Math.MACD import CMACD
 from Math.RSI import RSI
 from Math.RSL import RSL
 from Math.DMI import CDMI
+from Math.ADLine import ADLine
+from Math.DemandIndex import DemandIndex
+from Math.STARC import STARC
+
 from Math.TrendModel import CTrendModel
 from Seg.SegConfig import CSegConfig
 from ZS.ZSConfig import CZSConfig
@@ -33,6 +39,18 @@ class CChanConfig:
 
         self.cal_rsl = conf.get("cal_rsl", False)
         self.rsl_cycle = conf.get("rsl_cycle", 14)
+
+        self.cal_demand_index = conf.get("cal_demand_index", False)
+        self.cal_adline = conf.get("cal_adline", False)
+
+        self.cal_bb_vals = conf.get("cal_bb_vals", False)
+        self.bb_cycle = conf.get("bb_cycle", 20)
+
+        self.cal_kc_vals = conf.get("cal_kc_vals", False)
+        self.kc_cycle = conf.get("kc_cycle", 20)
+
+        self.cal_starc_vals = conf.get("cal_starc_vals", False)
+        self.starc_cycle = conf.get("starc_cycle", 20)
 
         self.bi_conf = CBiConfig(
             bi_algo=conf.get("bi_algo", "normal"),
@@ -83,7 +101,7 @@ class CChanConfig:
         conf.check()
 
     def GetMetricModel(self):
-        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | CDMI | RSL] = [
+        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | CDMI | RSL| DemandIndex | ADLine | BollingerBands | KeltnerChannel | STARC] = [
             CMACD(
                 fastperiod=self.macd_config['fast'],
                 slowperiod=self.macd_config['slow'],
@@ -114,6 +132,16 @@ class CChanConfig:
             res.append(KDJ(self.kdj_cycle))
         if self.cal_dmi:
             res.append(CDMI(self.dmi_cycle))
+        if self.cal_demand_index:
+            res.append(DemandIndex())
+        if self.cal_adline:
+            res.append(ADLine())
+        if self.cal_bb_vals:
+            res.append(BollingerBands(self.bb_cycle))
+        if self.cal_kc_vals:
+            res.append(KeltnerChannel(self.kc_cycle))
+        if self.cal_starc_vals:
+            res.append(STARC(self.starc_cycle))
         return res
 
     def set_bsp_config(self, conf):

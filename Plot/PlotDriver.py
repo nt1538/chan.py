@@ -286,6 +286,16 @@ class CPlotDriver:
             self.draw_rsl(meta, ax.twinx(), **plot_para.get('rsl', {}))
         if plot_config.get("plot_kdj", False):
             self.draw_kdj(meta, ax.twinx(), **plot_para.get('kdj', {}))
+        if plot_config.get("plot_demand_index", False):
+            self.draw_demand_index(meta, ax.twinx(), **plot_para.get('demand_index', {}))
+        if plot_config.get("plot_adline", False):
+            self.draw_adline(meta, ax.twinx(), **plot_para.get('adline', {}))
+        if plot_config.get("plot_bollinger_bands", False):
+            self.draw_bollinger_bands(meta, ax.twinx(), **plot_para.get('bollinger_bands', {}))
+        if plot_config.get("plot_keltner_channel", False):
+            self.draw_keltner_channel(meta, ax.twinx(), **plot_para.get('keltner_channel', {}))
+        if plot_config.get("plot_starc", False):
+            self.draw_starc(meta, ax.twinx(), **plot_para.get('starc', {}))
 
     def ShowDrawFuncHelper(self):
         # 写README的时候显示所有画图函数的参数和默认值
@@ -579,6 +589,7 @@ class CPlotDriver:
         ax.plot(x_idx, minus_di_line, "#ff0000", label="-DI")
         ax.plot(x_idx, adx_line, "#0000ff", label="ADX")
         ax.set_ylim(y_min, y_max)
+        ax.legend()
 
     def draw_rsl(
         self,
@@ -786,6 +797,68 @@ class CPlotDriver:
         data = [klu.rsi for klu in meta.klu_iter()]
         x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
         ax.plot(range(x_begin, x_end), data[x_begin: x_end], c=color)
+
+    def draw_demand_index(self, meta: CChanPlotMeta, ax, color='purple'):
+        data = [klu.demand_index for klu in meta.klu_iter()]
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        ax.plot(range(x_begin, x_end), data[x_begin:x_end], c=color, label="Demand Index")
+        ax.legend()
+
+    def draw_adline(
+        self,
+        meta: CChanPlotMeta,
+        ax,
+        color='purple',
+    ):
+        data = [klu.ad_line for klu in meta.klu_iter()]
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        ax.plot(range(x_begin, x_end), data[x_begin:x_end], c=color, label="A/D Line")
+        ax.legend()
+
+    def draw_bollinger_bands(self, meta: CChanPlotMeta, ax, color='gray'):
+        bb_upper = [getattr(klu, 'bb_upper', None) for klu in meta.klu_iter()]
+        bb_middle = [getattr(klu, 'bb_middle', None) for klu in meta.klu_iter()]
+        bb_lower = [getattr(klu, 'bb_lower', None) for klu in meta.klu_iter()]
+
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        x_range = range(x_begin, x_end)
+
+        def safe_values(values):
+            return [v if v is not None else float('nan') for v in values[x_begin:x_end]]
+
+        ax.plot(x_range, safe_values(bb_upper), label='BB Upper', color='red', linewidth=0.5)
+        ax.plot(x_range, safe_values(bb_middle), label='BB Middle', color='blue', linewidth=0.5)
+        ax.plot(x_range, safe_values(bb_lower), label='BB Lower', color='green', linewidth=0.5)
+        ax.legend()
+
+    def draw_keltner_channel(self, meta, ax, color='gray'):
+        kc_upper = [klu.kc_upper for klu in meta.klu_iter()]
+        kc_middle = [klu.kc_middle for klu in meta.klu_iter()]
+        kc_lower = [klu.kc_lower for klu in meta.klu_iter()]
+
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        x_range = range(x_begin, x_end)
+
+        ax.plot(x_range, kc_upper[x_begin:x_end], linestyle='--', linewidth=1, color=color, label='KC Upper')
+        ax.plot(x_range, kc_middle[x_begin:x_end], linestyle='-', linewidth=1, color=color, label='KC Middle')
+        ax.plot(x_range, kc_lower[x_begin:x_end], linestyle='--', linewidth=1, color=color, label='KC Lower')
+
+        ax.legend()
+
+    def draw_starc(self, meta: CChanPlotMeta, ax, color='purple'):
+        starc_upper = [klu.starc_upper for klu in meta.klu_iter()]
+        starc_middle = [klu.starc_middle for klu in meta.klu_iter()]
+        starc_lower = [klu.starc_lower for klu in meta.klu_iter()]
+
+        x_begin, x_end = int(ax.get_xlim()[0]), int(ax.get_xlim()[1])
+        x_range = range(x_begin, x_end)
+
+        def _filter(data): return [v if v is not None else float('nan') for v in data[x_begin:x_end]]
+
+        ax.plot(x_range, _filter(starc_upper), label='STARC Upper', color=color, linestyle='--', linewidth=1)
+        ax.plot(x_range, _filter(starc_middle), label='STARC Mid', color=color, linestyle='-', linewidth=1)
+        ax.plot(x_range, _filter(starc_lower), label='STARC Lower', color=color, linestyle='--', linewidth=1)
+        ax.legend()
 
     def draw_kdj(
         self,
