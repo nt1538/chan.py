@@ -282,6 +282,8 @@ class CPlotDriver:
             self.draw_marker(meta, ax, **plot_para.get('marker', {'markers': {}}))
         if plot_config.get("plot_rsi", False):
             self.draw_rsi(meta, ax.twinx(), **plot_para.get('rsi', {}))
+        if plot_config.get("plot_rsl", False):
+            self.draw_rsl(meta, ax.twinx(), **plot_para.get('rsl', {}))
         if plot_config.get("plot_kdj", False):
             self.draw_kdj(meta, ax.twinx(), **plot_para.get('kdj', {}))
 
@@ -577,6 +579,20 @@ class CPlotDriver:
         ax.plot(x_idx, minus_di_line, "#ff0000", label="-DI")
         ax.plot(x_idx, adx_line, "#0000ff", label="ADX")
         ax.set_ylim(y_min, y_max)
+
+    def draw_rsl(self, meta, ax, color='blue'):
+        if meta.chan_metric is None:
+            return
+        if 'RSL' not in meta.chan_metric.metrics:
+            return
+        rsl_data = meta.chan_metric.metrics['RSL'].get_value()
+        if not rsl_data:
+            return
+        x = list(meta.kline.keys())
+        y = rsl_data
+        ax.plot(x, y, label="RSL", color=color)
+        ax.axhline(y=1.0, color='gray', linestyle='--', linewidth=0.5)
+        ax.legend()
 
     def draw_mean(self, meta: CChanPlotMeta, ax: Axes):
         mean_lst = [klu.trend[TREND_TYPE.MEAN] for klu in meta.klu_iter()]

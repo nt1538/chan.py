@@ -10,6 +10,7 @@ from Math.KDJ import KDJ
 from Math.MACD import CMACD, CMACD_item
 from Math.DMI import CDMI  # Ensure DMI module is imported
 from Math.RSI import RSI
+from Math.RSL import RSL
 from Math.TrendModel import CTrendModel
 
 from .TradeInfo import CTradeInfo
@@ -68,6 +69,8 @@ class CKLine_Unit:
             obj.rsi = copy.deepcopy(self.rsi, memo)
         if hasattr(self, "kdj"):
             obj.kdj = copy.deepcopy(self.kdj, memo)
+        if hasattr(self, "rsl"):
+            obj.rsl = copy.deepcopy(self.rsl, memo)
         obj.set_idx(self.idx)
         memo[id(self)] = obj
         return obj
@@ -131,6 +134,8 @@ class CKLine_Unit:
                 self.demark = metric_model.update(idx=self.idx, close=self.close, high=self.high, low=self.low)
             elif isinstance(metric_model, RSI):
                 self.rsi = metric_model.add(self.close)
+            elif isinstance(metric_model, RSL):
+                self.rsl = metric_model.add(self.close)
             elif isinstance(metric_model, KDJ):
                 self.kdj = metric_model.add(self.high, self.low, self.close)
             elif isinstance(metric_model, CDMI):

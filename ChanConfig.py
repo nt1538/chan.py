@@ -10,6 +10,7 @@ from Math.Demark import CDemarkEngine
 from Math.KDJ import KDJ
 from Math.MACD import CMACD
 from Math.RSI import RSI
+from Math.RSL import RSL
 from Math.DMI import CDMI
 from Math.TrendModel import CTrendModel
 from Seg.SegConfig import CSegConfig
@@ -29,6 +30,10 @@ class CChanConfig:
 
         self.cal_kdj = conf.get("cal_kdj", False)
         self.kdj_cycle = conf.get("kdj_cycle", 9)
+
+        self.cal_rsl = conf.get("cal_rsl", False)
+        self.rsl_cycle = conf.get("rsl_cycle", 14)
+
         self.bi_conf = CBiConfig(
             bi_algo=conf.get("bi_algo", "normal"),
             is_strict=conf.get("bi_strict", True),
@@ -78,7 +83,7 @@ class CChanConfig:
         conf.check()
 
     def GetMetricModel(self):
-        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | DMI] = [
+        res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | CDMI | RSL] = [
             CMACD(
                 fastperiod=self.macd_config['fast'],
                 slowperiod=self.macd_config['slow'],
@@ -103,6 +108,8 @@ class CChanConfig:
             ))
         if self.cal_rsi:
             res.append(RSI(self.rsi_cycle))
+        if self.cal_rsl:
+            res.append(RSL(self.rsl_cycle))
         if self.cal_kdj:
             res.append(KDJ(self.kdj_cycle))
         if self.cal_dmi:
