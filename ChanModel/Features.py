@@ -16,3 +16,6 @@ class CFeatures:
             self.__features.update(inp1)
         else:
             self.__features.update({inp1: inp2})
+
+    def to_dict(self):
+        return dict(self.__features)
