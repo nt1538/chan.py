@@ -1,24 +1,27 @@
+import os
 import csv
-from typing import List
+from typing import List, Dict
+from collections import defaultdict
 from Common.CEnum import KL_TYPE
 from Chan import CChan
 
 
-def extract_features_from_cbs_points(chan: CChan, lv: KL_TYPE) -> List[dict]:
+def extract_features_from_cbs_points(chan: CChan, lv: KL_TYPE) -> Dict[str, List[dict]]:
     """
     Extract features from all CBS_Points in the given level of the chan system.
+    Returns a dictionary of feature lists, grouped by BS type (e.g., "1", "2", "2s").
     """
     bs_points = chan.kl_datas[lv].bs_point_lst.getSortedBspList()
-    features = []
+    grouped_features = defaultdict(list)
 
     for bsp in bs_points:
         base_feat = {
             'index': bsp.klu.idx,
-            'timestamp': bsp.klu.time,
             'type': bsp.type2str(),
             'is_buy': bsp.is_buy,
             'divergence_rate': getattr(bsp, 'divergence_rate', None),
-            'is_segbsp': getattr(bsp, 'is_segbsp', False)
+            'is_segbsp': getattr(bsp, 'is_segbsp', False),
+            'timestamp': bsp.klu.time,
         }
 
         # Add all features from the CFeatures object
@@ -28,32 +31,39 @@ def extract_features_from_cbs_points(chan: CChan, lv: KL_TYPE) -> List[dict]:
         else:
             all_feat = base_feat
 
-        features.append(all_feat)
+        # group by each bs_type this point has
+        for t in bsp.type:
+            grouped_features[t.value].append(all_feat)
 
-    return features
+    return grouped_features
 
 
-def export_bs_feature_file(chan: CChan, lv: KL_TYPE, filename: str, window: int = 5):
+def export_bs_feature_files_by_type(chan: CChan, lv: KL_TYPE, output_dir: str):
     """
-    Export BS features to a CSV file.
+    Export BS point features to multiple CSV files, grouped by BS type.
+    Each file will be named like: `bs_features_type_<type>.csv`.
     """
-    print(f"Exporting BS features for level {lv} to: {filename}")
-    features = extract_features_from_cbs_points(chan, lv)
+    os.makedirs(output_dir, exist_ok=True)
 
-    if not features:
-        print("No features extracted.")
+    grouped = extract_features_from_cbs_points(chan, lv)
+
+    if not grouped:
+        print("No BS points found.")
         return
 
-    # ✅ 收集所有 feature keys
-    all_fieldnames = set()
-    for feat in features:
-        all_fieldnames.update(feat.keys())
+    for bs_type, features in grouped.items():
+        if not features:
+            continue
 
-    fieldnames = sorted(all_fieldnames)
+        all_fieldnames = set()
+        for feat in features:
+            all_fieldnames.update(feat.keys())
+        fieldnames = sorted(all_fieldnames)
 
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(features)
+        filename = os.path.join(output_dir, f"bs_features_type_{bs_type}.csv")
+        with open(filename, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(features)
 
-    print(f"Exported {len(features)} BS points to: {filename}")
+        print(f"[✓] Exported {len(features)} '{bs_type}' BS points to: {filename}")

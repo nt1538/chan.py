@@ -45,6 +45,7 @@ class CYahooFinance(CCommonStockApi):
 
     def _convert_interval(self):
         mapping = {
+            KL_TYPE.K_1M: "1m",
             KL_TYPE.K_DAY: "1d",
             KL_TYPE.K_5M: "5m",
             KL_TYPE.K_15M: "15m",

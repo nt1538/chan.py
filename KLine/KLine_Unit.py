@@ -23,7 +23,7 @@ from .TradeInfo import CTradeInfo
 
 
 class CKLine_Unit:
-    def __init__(self, kl_dict, autofix=False):
+    def __init__(self, kl_dict, autofix=True):
         # _time, _close, _open, _high, _low, _extra_info={}
         self.kl_type = None
         self.time: CTime = kl_dict[DATA_FIELD.FIELD_TIME]

@@ -1,0 +1,2 @@
+bsp_bi_amp,divergence_rate,index,is_buy,is_segbsp,kdj_k,macd_dea,macd_diff,macd_value,ppo,rsi,timestamp,type,volume,zs_cnt
+0.375,1.0615442532563337,900,True,False,,-0.03828618815807345,-0.046933723622380796,-0.017295070928614695,-0.0011072506112975485,20.339121543374134,2025/06/11 16:08,1,7817.0,1
