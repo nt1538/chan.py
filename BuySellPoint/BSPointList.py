@@ -136,11 +136,11 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
            not seg.zs_lst[-1].is_one_bi_zs() and \
            ((seg.zs_lst[-1].bi_out and seg.zs_lst[-1].bi_out.idx >= seg.end_bi.idx) or seg.zs_lst[-1].bi_lst[-1].idx >= seg.end_bi.idx) \
            and seg.end_bi.idx - seg.zs_lst[-1].get_bi_in().idx > 2:
-            self.treat_bsp1(seg, BSP_CONF, is_target_bsp)
+            self.treat_bsp1(seg, BSP_CONF, bi_list, is_target_bsp)
         else:
             self.treat_pz_bsp1(seg, BSP_CONF, bi_list, is_target_bsp)
 
-    def treat_bsp1(self, seg: CSeg[LINE_TYPE], BSP_CONF: CPointConfig, is_target_bsp: bool):
+    def treat_bsp1(self, seg: CSeg[LINE_TYPE], BSP_CONF: CPointConfig, bi_list: LINE_LIST_TYPE, is_target_bsp: bool):
         last_zs = seg.zs_lst[-1]
         break_peak, _ = last_zs.out_bi_is_peak(seg.end_bi.idx)
         if BSP_CONF.bs1_peak and not break_peak:
@@ -148,7 +148,8 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         is_diver, divergence_rate = last_zs.is_divergence(BSP_CONF, out_bi=seg.end_bi)
         if not is_diver:
             is_target_bsp = False
-
+        last_bi = seg.end_bi
+        next_bi = bi_list[last_bi.idx+1]
         kl_data = seg.end_bi.get_end_klu()
         macd_item = getattr(kl_data, 'macd', None)
         macd_value = getattr(macd_item, 'macd', None)
@@ -159,6 +160,8 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         ppo = (macd_fast - macd_slow) / macd_slow
         feature_dict = {
             'divergence_rate': divergence_rate,
+            'bsp1_bi_amp': last_bi.amp(),
+            'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
             'zs_cnt': len(seg.zs_lst),
             'macd_value': macd_value,
             'macd_dea': macd_dea,
@@ -166,13 +169,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             'ppo': ppo,
             'rsi': getattr(kl_data, 'rsi', None),
             'kdj_k': getattr(kl_data, 'kdj_k', None),
-            'volume': getattr(kl_data, 'volume', None)
+            'volume': getattr(kl_data, 'volume', None),
+            "next_bi_return": next_bi.amp()/next_bi.get_begin_val(),
         }
         self.add_bs(bs_type=BSP_TYPE.T1, bi=seg.end_bi, relate_bsp1=None, is_target_bsp=is_target_bsp, feature_dict=feature_dict)
 
     def treat_pz_bsp1(self, seg: CSeg[LINE_TYPE], BSP_CONF: CPointConfig, bi_list: LINE_LIST_TYPE, is_target_bsp):
         last_bi = seg.end_bi
         pre_bi = bi_list[last_bi.idx-2]
+        next_bi = bi_list[last_bi.idx+1]
         if last_bi.seg_idx != pre_bi.seg_idx:
             return
         if last_bi.dir != seg.dir:
@@ -199,13 +204,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'divergence_rate': divergence_rate,
                 'bsp1_bi_amp': last_bi.amp(),
+                'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
                 'macd_diff': macd_diff,
                 'ppo': ppo,
                 'rsi': getattr(kl_data, 'rsi', None),
                 'kdj_k': getattr(kl_data, 'kdj_k', None),
-                'volume': getattr(kl_data, 'volume', None)
+                'volume': getattr(kl_data, 'volume', None),
+                "next_bi_return": next_bi.amp()/next_bi.get_begin_val(),
             }
         elif isinstance(last_bi, CSeg) and len(last_bi.bi_list) > 0 and isinstance(last_bi.bi_list[-1], CBi):
             bi_tail = last_bi.bi_list[-1]
@@ -220,6 +227,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'divergence_rate': divergence_rate,
                 'bsp1_bi_amp': last_bi.amp(),
+                'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
                 'macd_diff': macd_diff,
@@ -227,6 +235,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 'rsi': getattr(kl_data, 'rsi', None),
                 'kdj_k': getattr(kl_data, 'kdj_k', None),
                 'volume': getattr(kl_data, 'volume', None),
+                "next_bi_return": next_bi.amp()/next_bi.get_begin_val(),
             }
         self.add_bs(bs_type=BSP_TYPE.T1P, bi=last_bi, relate_bsp1=None, is_target_bsp=is_target_bsp, feature_dict=feature_dict)
 
@@ -259,6 +268,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             return
         retrace_rate = bsp2_bi.amp()/break_bi.amp()
         bsp2_flag = retrace_rate <= BSP_CONF.max_bs2_rate
+        next_bi = bi_list[bsp2_bi.idx+1]
         if bsp2_flag:
             kl_data = bsp2_bi.get_end_klu()
             macd_item = getattr(kl_data, 'macd', None)
@@ -271,14 +281,17 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'bsp2_retrace_rate': retrace_rate,
                 'bsp2_break_bi_amp': break_bi.amp(),
+                'bsp2_break_bi_amp_rate': break_bi.amp()/break_bi.get_begin_val(),
                 'bsp2_bi_amp': bsp2_bi.amp(),
+                'bsp2_bi_amp_rate': bsp2_bi.amp()/bsp2_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
                 'macd_diff': macd_diff,
                 'ppo': ppo,
                 'rsi': getattr(kl_data, 'rsi', None),
                 'kdj_k': getattr(kl_data, 'kdj_k', None),
-                'volume': getattr(kl_data, 'volume', None)
+                'volume': getattr(kl_data, 'volume', None),
+                "next_bi_return": next_bi.amp()/next_bi.get_begin_val(),
             }
             self.add_bs(bs_type=BSP_TYPE.T2, bi=bsp2_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)
         elif BSP_CONF.bsp2s_follow_2:
@@ -318,7 +331,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             retrace_rate = abs(bsp2s_bi.get_end_val()-break_bi.get_end_val())/break_bi.amp()
             if retrace_rate > BSP_CONF.max_bs2_rate:
                 break
-
+            next_bi = bi_list[bsp2s_bi.idx+1]
             kl_data = bsp2s_bi.get_end_klu()
             macd_item = getattr(kl_data, 'macd', None)
             macd_value = getattr(macd_item, 'macd', None)
@@ -327,10 +340,13 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             macd_fast = getattr(macd_item, 'fast_ema', None)
             macd_slow = getattr(macd_item, 'slow_ema', None)
             ppo = (macd_fast - macd_slow) / macd_slow
+            
             feature_dict = {
                 'bsp2s_retrace_rate': retrace_rate,
                 'bsp2s_break_bi_amp': break_bi.amp(),
+                'bsp2s_break_bi_amp_rate': break_bi.amp()/break_bi.get_begin_val(),
                 'bsp2s_bi_amp': bsp2s_bi.amp(),
+                'bsp2s_bi_amp_rate': bsp2s_bi.amp()/bsp2s_bi.get_begin_val(),
                 'bsp2s_lv': bias / 2,
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
@@ -338,7 +354,8 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 'ppo': ppo,
                 'rsi': getattr(kl_data, 'rsi', None),
                 'kdj_k': getattr(kl_data, 'kdj_k', None),
-                'volume': getattr(kl_data, 'volume', None)
+                'volume': getattr(kl_data, 'volume', None),
+                'next_bi_return': next_bi.amp()/next_bi.get_begin_val(),
             }
             self.add_bs(bs_type=BSP_TYPE.T2S, bi=bsp2s_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
             bias += 2
@@ -402,6 +419,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         bsp3_peak_zs = bsp3_break_zspeak(bsp3_bi, first_zs)
         if BSP_CONF.bsp3_peak and not bsp3_peak_zs:
             return
+        next_bi = bi_list[bsp3_bi.idx+1]
         kl_data = bsp3_bi.get_end_klu()
         macd_item = getattr(kl_data, 'macd', None)
         macd_value = getattr(macd_item, 'macd', None)
@@ -413,13 +431,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         feature_dict = {
             'bsp3_zs_height': (first_zs.high - first_zs.low) / first_zs.low,
             'bsp3_bi_amp': bsp3_bi.amp(),
+            'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
             'macd_value': macd_value,
             'macd_dea': macd_dea,
             'macd_diff': macd_diff,
             'ppo': ppo,
             'rsi': getattr(kl_data, 'rsi', None),
             'kdj_k': getattr(kl_data, 'kdj_k', None),
-            'volume': getattr(kl_data, 'volume', None)
+            'volume': getattr(kl_data, 'volume', None),
+            'next_bi_return': next_bi.amp()/next_bi.get_begin_val(),
         }
         self.add_bs(bs_type=BSP_TYPE.T3A, bi=bsp3_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
 
@@ -451,6 +471,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 break
             if bsp3_back2zs(bsp3_bi, cmp_zs):  # type: ignore
                 continue
+            next_bi = bi_list[bsp3_bi.idx+1]
             kl_data = bsp3_bi.get_end_klu()
             macd_item = getattr(kl_data, 'macd', None)
             macd_value = getattr(macd_item, 'macd', None)
@@ -462,13 +483,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'bsp3_zs_height': (cmp_zs.high - cmp_zs.low) / cmp_zs.low,
                 'bsp3_bi_amp': bsp3_bi.amp(),
+                'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
                 'macd_diff': macd_diff,
                 'ppo': ppo,
                 'rsi': getattr(kl_data, 'rsi', None),
                 'kdj_k': getattr(kl_data, 'kdj_k', None),
-                'volume': getattr(kl_data, 'volume', None)
+                'volume': getattr(kl_data, 'volume', None),
+                'next_bi_return': next_bi.amp()/next_bi.get_begin_val(),
             }
             self.add_bs(bs_type=BSP_TYPE.T3B, bi=bsp3_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
             break

@@ -1,0 +1,2 @@
+bsp2s_bi_amp,bsp2s_break_bi_amp,bsp2s_lv,bsp2s_retrace_rate,bsp_bi_amp,divergence_rate,index,is_buy,is_segbsp,kdj_k,macd_dea,macd_diff,macd_value,ppo,rsi,timestamp,type,volume
+0.07529830932617188,0.25,1.0,0.0619964599609375,0.07529830932617188,,462,True,False,,0.0027059038190212327,-0.0015615675945070961,-0.008534942827056658,-4.851574468945473e-05,47.63480447351042,2025/06/17 14:48,2s,11817.0
