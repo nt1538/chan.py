@@ -1,0 +1,2 @@
+bsp3_bi_amp,bsp3_bi_amp_rate,bsp3_zs_height,bsp_bi_amp,divergence_rate,index,is_buy,is_segbsp,kdj,macd_dea,macd_diff,macd_value,next_bi_return,ppo,rsi,timestamp,type,volume
+0.125,0.004080966484651759,0.00016417604733481704,0.125,,154,True,False,<Math.KDJ.KDJ_Item object at 0x00000241485A8770>,0.008405763995477909,-0.0006670715921295312,-0.01814567117521488,0.0050811568893553314,-2.183984184650189e-05,43.321723230146205,2025/06/17 16:06,3a,6965.0
