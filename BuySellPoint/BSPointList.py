@@ -166,6 +166,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         feature_dict = {
             'divergence_rate': divergence_rate,
             'bsp1_bi_amp': last_bi.amp(),
+            'bsp1_bi_klu_cnt': last_bi.get_klu_cnt(),
             'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
             'zs_cnt': len(seg.zs_lst),
             'macd_value': macd_value,
@@ -217,6 +218,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'divergence_rate': divergence_rate,
                 'bsp1_bi_amp': last_bi.amp(),
+                'bsp1_bi_klu_cnt': last_bi.get_klu_cnt(),
                 'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
@@ -248,6 +250,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'divergence_rate': divergence_rate,
                 'bsp1_bi_amp': last_bi.amp(),
+                'bsp1_bi_klu_cnt': last_bi.get_klu_cnt(),
                 'bsp1_bi_amp_rate': last_bi.amp()/last_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
@@ -309,8 +312,10 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'bsp2_retrace_rate': retrace_rate,
                 'bsp2_break_bi_amp': break_bi.amp(),
+                'bsp2_break_bi_bi_klu_cnt': break_bi.get_klu_cnt(),
                 'bsp2_break_bi_amp_rate': break_bi.amp()/break_bi.get_begin_val(),
                 'bsp2_bi_amp': bsp2_bi.amp(),
+                'bsp2_bi_klu_cnt': bsp2_bi.get_klu_cnt(),
                 'bsp2_bi_amp_rate': bsp2_bi.amp()/bsp2_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,
@@ -378,8 +383,10 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'bsp2s_retrace_rate': retrace_rate,
                 'bsp2s_break_bi_amp': break_bi.amp(),
+                'bsp2s_break_bi_klu_cnt': break_bi.get_klu_cnt(),
                 'bsp2s_break_bi_amp_rate': break_bi.amp()/break_bi.get_begin_val(),
                 'bsp2s_bi_amp': bsp2s_bi.amp(),
+                'bsp2s_bi_klu_cnt': bsp2s_bi.get_klu_cnt(),
                 'bsp2s_bi_amp_rate': bsp2s_bi.amp()/bsp2s_bi.get_begin_val(),
                 'bsp2s_lv': bias / 2,
                 'macd_value': macd_value,
@@ -471,6 +478,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         feature_dict = {
             'bsp3_zs_height': (first_zs.high - first_zs.low) / first_zs.low,
             'bsp3_bi_amp': bsp3_bi.amp(),
+            'bsp3_bi_klu_cnt': bsp3_bi.get_klu_cnt(),
             'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
             'macd_value': macd_value,
             'macd_dea': macd_dea,
@@ -530,6 +538,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             feature_dict = {
                 'bsp3_zs_height': (cmp_zs.high - cmp_zs.low) / cmp_zs.low,
                 'bsp3_bi_amp': bsp3_bi.amp(),
+                'bsp3_bi_klu_cnt': bsp3_bi.get_klu_cnt(),
                 'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
                 'macd_value': macd_value,
                 'macd_dea': macd_dea,

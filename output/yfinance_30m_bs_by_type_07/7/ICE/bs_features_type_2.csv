@@ -1,0 +1,2 @@
+bsp2_bi_amp,bsp2_bi_amp_rate,bsp2_bi_klu_cnt,bsp2_break_bi_amp,bsp2_break_bi_amp_rate,bsp2_break_bi_bi_klu_cnt,bsp2_retrace_rate,bsp_bi_amp,divergence_rate,index,is_buy,is_segbsp,kdj_d,kdj_j,kdj_k,macd_dea,macd_diff,macd_value,next_bi_return,ppo,rsi,timestamp,type,volume
+2.5,0.01389274822115756,11,5.209991455078125,0.029815676383745698,36,0.479847236133809,2.5,,322,True,False,36.637828788756316,7.614769480788482,26.96347568610037,0.4064911731978447,0.22155451332707798,-0.3698733197415335,0.023555976367751183,0.0012422712047104466,48.68799451025291,2025/06/13 18:30,2,98995.0

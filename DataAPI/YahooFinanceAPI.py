@@ -1,4 +1,5 @@
 import yfinance as yf
+import pandas as pd
 from typing import Iterable
 from datetime import datetime
 
@@ -7,6 +8,10 @@ from Common.CTime import CTime
 from KLine.KLine_Unit import CKLine_Unit
 from .CommonStockAPI import CCommonStockApi
 
+def safe_float(val):
+    if isinstance(val, pd.Series):
+        return float(val.iloc[0])
+    return float(val)
 
 class CYahooFinance(CCommonStockApi):
     def __init__(self, code, k_type=KL_TYPE.K_DAY, begin_date=None, end_date=None, autype=AUTYPE.NONE):
@@ -23,12 +28,13 @@ class CYahooFinance(CCommonStockApi):
             dt = index.to_pydatetime()
             item = {
                 DATA_FIELD.FIELD_TIME: CTime(dt.year, dt.month, dt.day, dt.hour, dt.minute),
-                DATA_FIELD.FIELD_OPEN: float(row["Open"]),
-                DATA_FIELD.FIELD_HIGH: float(row["High"]),
-                DATA_FIELD.FIELD_LOW: float(row["Low"]),
-                DATA_FIELD.FIELD_CLOSE: float(row["Close"]),
-                DATA_FIELD.FIELD_VOLUME: float(row.get("Volume", 0)),
+                DATA_FIELD.FIELD_OPEN: safe_float(row["Open"]),
+                DATA_FIELD.FIELD_HIGH: safe_float(row["High"]),
+                DATA_FIELD.FIELD_LOW: safe_float(row["Low"]),
+                DATA_FIELD.FIELD_CLOSE: safe_float(row["Close"]),
+                DATA_FIELD.FIELD_VOLUME: safe_float(row.get("Volume", 0)),
             }
+
             yield CKLine_Unit(item)
 
     def SetBasciInfo(self):
@@ -57,3 +63,4 @@ class CYahooFinance(CCommonStockApi):
         if self.k_type not in mapping:
             raise Exception(f"k_type {self.k_type} not supported by yfinance.")
         return mapping[self.k_type]
+    
