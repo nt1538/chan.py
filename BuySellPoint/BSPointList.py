@@ -1,3 +1,5 @@
+from .BSPointChain import BSPointChainManager
+from copy import deepcopy
 from typing import Dict, Generic, Iterable, List, Optional, Tuple, TypeVar
 
 from Bi.Bi import CBi
@@ -17,6 +19,7 @@ LINE_LIST_TYPE = TypeVar('LINE_LIST_TYPE', CBiList, CSegListComm[CBi])
 
 class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
     def __init__(self, bs_point_config: CBSPointConfig):
+        self.chain_manager = BSPointChainManager()
         self.bsp_store_dict: Dict[BSP_TYPE, Tuple[List[CBS_Point[LINE_TYPE]], List[CBS_Point[LINE_TYPE]]]] = {}
         self.bsp_store_flat_dict: Dict[int, CBS_Point[LINE_TYPE]] = {}
 
@@ -26,6 +29,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.config = bs_point_config
         self.last_sure_pos = -1
         self.last_sure_seg_idx = 0
+        self.watching_bs_points: List[Dict] = []
 
     def store_add_bsp(self, bsp_type: BSP_TYPE, bsp: CBS_Point[LINE_TYPE]):
         if bsp_type not in self.bsp_store_dict:
@@ -34,8 +38,32 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             assert self.bsp_store_dict[bsp_type][bsp.is_buy][-1].bi.idx < bsp.bi.idx, f"{bsp_type}, {bsp.is_buy} {self.bsp_store_dict[bsp_type][bsp.is_buy][-1].bi.idx} {bsp.bi.idx}"
         self.bsp_store_dict[bsp_type][bsp.is_buy].append(bsp)
         self.bsp_store_flat_dict[bsp.bi.idx] = bsp
+        # Add to watching list
+        if bsp_type in [BSP_TYPE.T1, BSP_TYPE.T1P, BSP_TYPE.T2, BSP_TYPE.T2S, BSP_TYPE.T3A, BSP_TYPE.T3B]:
+            self.watching_bs_points.append({
+                "bs_point": bsp,
+                "bi_idx": bsp.bi.idx,
+                "first_detected_index": bsp.bi.get_end_klu().idx,
+                "kline_unit_snapshot": deepcopy(bsp.bi.get_end_klu()),
+                "status": "watching",
+                "bs_type": bsp_type
+            })
+
+    def _mark_bs_point_status(self, bsp: CBS_Point[LINE_TYPE], new_status: str):
+        for entry in self.watching_bs_points:
+            if entry["bs_point"] == bsp:
+                entry["status"] = new_status
+                return
+
+    def confirm_watching_bs_points(self, current_idx: int):
+        for entry in self.watching_bs_points:
+            if entry["status"] != "watching":
+                continue
+            if current_idx - entry["first_detected_index"] > 5:
+                entry["status"] = "confirmed"
 
     def add_bsp1(self, bsp: CBS_Point[LINE_TYPE]):
+        self.chain_manager.add_bsp(bsp)
         if len(self.bsp1_list) > 0:
             assert self.bsp1_list[-1].bi.idx < bsp.bi.idx
         self.bsp1_list.append(bsp)

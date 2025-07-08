@@ -22,6 +22,9 @@ class CBS_Point(Generic[LINE_TYPE]):
         self.is_segbsp = False
 
         self.init_common_feature()
+        self.mature_rate: Optional[float] = None           # 成熟率：0 ~ 1
+        self.is_mature_point: bool = False                 # 是否是最终确认的成熟点
+        self.is_post_mature: bool = False                  # 是否为成熟点后的观察点（延伸）
 
     def add_type(self, bs_type: BSP_TYPE):
         self.type.append(bs_type)
