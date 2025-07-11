@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Union
 
 from BuySellPoint.BS_Point import CBS_Point
+from BuySellPoint.BSPointChain import CBSPointChainTracker
 from ChanConfig import CChanConfig
 from Common.CEnum import AUTYPE, DATA_SRC, KL_TYPE
 from Common.ChanException import CChanException, ErrCode
@@ -51,6 +52,10 @@ class CChan:
         if not config.trigger_step:
             for _ in self.load():
                 ...
+
+        self.bs_chain_tracker = CBSPointChainTracker()
+        self.bs_chains_by_type = self.bs_chain_tracker.chains_by_type
+
 
     def __deepcopy__(self, memo):
         cls = self.__class__
@@ -117,15 +122,53 @@ class CChan:
             else:
                 raise
 
+    # def step_load(self):
+    #     assert self.conf.trigger_step
+    #     self.do_init()  # 清空数据，防止再次重跑没有数据
+    #     yielded = False  # 是否曾经返回过结果
+    #     tracker = CBSPointChainTracker()
+    #     for idx, snapshot in enumerate(self.load(self.conf.trigger_step)):
+    #         if idx < self.conf.skip_step:
+    #             continue
+    #         bs_point_lst = snapshot.kl_datas[self.lv_list[0]].bs_point_lst
+    #         current_bsp_list = bs_point_lst.getSortedBspList()
+    #         tracker.track(current_bsp_list)
+    #         yield snapshot
+    #         yielded = True
+    #     if not yielded:
+    #         yield self
+    #     self.bs_chains_by_type = tracker.chains_by_type
+
+
     def step_load(self):
-        assert self.conf.trigger_step
-        self.do_init()  # 清空数据，防止再次重跑没有数据
-        yielded = False  # 是否曾经返回过结果
-        for idx, snapshot in enumerate(self.load(self.conf.trigger_step)):
+        """
+        针对逐步加载的主逻辑，每次推进一个 KLine 单位，并执行链条追踪。
+        """
+        assert self.conf.trigger_step, "trigger_step 必须为 True 才能使用 step_load"
+        self.do_init()
+        yielded = False
+        prev_bsp_list = None
+
+        for idx, snapshot in enumerate(self.load(step=True)):
             if idx < self.conf.skip_step:
                 continue
+
+            curr_bsp_list = snapshot.kl_datas[self.lv_list[0]].bs_point_lst
+
+            if hasattr(self, "bs_chain_tracker") and prev_bsp_list is not None:
+                try:
+                    self.bs_chain_tracker.update_with_bspoint_diff(
+                        prev_bsp_list,
+                        curr_bsp_list,
+                        lv=self.lv_list[0]
+                    )
+                except Exception as e:
+                    print(f"[⚠] BS 追踪失败：{e}")
+
+            prev_bsp_list = copy.deepcopy(curr_bsp_list)
             yield snapshot
             yielded = True
+
         if not yielded:
             yield self
 
