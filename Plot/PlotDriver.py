@@ -12,7 +12,7 @@ from Common.ChanException import CChanException, ErrCode
 from Common.CTime import CTime
 from Math.Demark import T_DEMARK_INDEX, CDemarkEngine
 
-from .PlotMeta import CBi_meta, CChanPlotMeta, CZS_meta
+from .PlotMeta import CBi_meta, CChanPlotMeta, CBS_Point_meta, CZS_meta
 
 
 def reformat_plot_config(plot_config: Dict[str, bool]):
@@ -196,7 +196,7 @@ class CPlotDriver:
                 set_x_tick(ax_macd, x_limits, meta.datetick, figure_config.get('x_tick_num', 10))
             self.y_min, self.y_max = cal_y_range(meta, ax)  # 需要先设置 x_tick后计算
 
-            self.DrawElement(plot_config[lv], meta, ax, lv, plot_para, ax_macd, x_limits)
+            self.DrawElement(chan, plot_config[lv], meta, ax, lv, plot_para, ax_macd, x_limits)
 
             if lv != self.lv_lst[-1]:
                 if slv_seg_cnt is not None:
@@ -241,7 +241,7 @@ class CPlotDriver:
             return x_range
         return x_range
 
-    def DrawElement(self, plot_config: Dict[str, bool], meta: CChanPlotMeta, ax: Axes, lv, plot_para, ax_macd: Optional[Axes], x_limits):
+    def DrawElement(self, chan, plot_config: Dict[str, bool], meta: CChanPlotMeta, ax: Axes, lv, plot_para, ax_macd: Optional[Axes], x_limits):
         if plot_config.get("plot_kline", False):
             self.draw_klu(meta, ax, **plot_para.get('kl', {}))
         if plot_config.get("plot_kline_combine", False):
@@ -274,6 +274,8 @@ class CPlotDriver:
             self.draw_boll(meta, ax, **plot_para.get('boll', {}))
         if plot_config.get("plot_bsp", False):
             self.draw_bs_point(meta, ax, **plot_para.get('bsp', {}))
+        if plot_config.get("plot_bsc", False):
+            self.draw_bsp_chain_as_flat(chan, meta, ax, **plot_para.get('bsc', {}))
         if plot_config.get("plot_segbsp", False):
             self.draw_seg_bs_point(meta, ax, **plot_para.get('seg_bsp', {}))
         if plot_config.get("plot_demark", False):
@@ -681,6 +683,64 @@ class CPlotDriver:
             arrow_h=arrow_h,
             arrow_w=arrow_w,
         )
+
+    def draw_bsp_chain_as_flat(
+        self,
+        chan,
+        meta: CChanPlotMeta,
+        ax: Axes,
+        bs_type_str: str = "1",
+        buy_color='blue',
+        sell_color='orange',
+        fontsize=12,
+        arrow_l=0.1,
+        arrow_h=0.2,
+        arrow_w=0.8,
+    ):
+        """
+        将 BSPoint Chain 拉平为普通点列表，复用 bsp_common_draw 逻辑
+        """
+        if not hasattr(chan, 'bs_chain_tracker'):
+            print("[⚠] draw_bsp_chain_as_flat: chan.bs_chain_tracker 不存在")
+            return
+
+        chains_by_type = getattr(chan.bs_chain_tracker, "chains_by_type", {})
+        if not isinstance(chains_by_type, dict):
+            print("[⚠] draw_bsp_chain_as_flat: chains_by_type 不是字典")
+            return
+
+        # ✅ 用模糊匹配过滤 key（key 里包含 '1'，'3a' 等）
+        matched_keys = [k for k in chains_by_type if f"'{bs_type_str}'" in k]
+        if not matched_keys:
+            print(f"[⚠] draw_bsp_chain_as_flat: 没有找到包含 '{bs_type_str}' 的链 key")
+            return
+
+        bsp_chains = []
+        for k in matched_keys:
+            bsp_chains.extend(chains_by_type[k])
+
+        if not bsp_chains:
+            print(f"[⚠] draw_bsp_chain_as_flat: 链为空 for {bs_type_str}")
+            return
+
+        flat_bsp_list = [
+            CBS_Point_meta(bsp, is_seg=False)
+            for chain in bsp_chains
+            for bsp in chain
+        ]
+
+
+        self.bsp_common_draw(
+            bsp_list=flat_bsp_list,
+            ax=ax,
+            buy_color=buy_color,
+            sell_color=sell_color,
+            fontsize=fontsize,
+            arrow_l=arrow_l,
+            arrow_h=arrow_h,
+            arrow_w=arrow_w,
+        )
+
 
     def draw_seg_bs_point(self, meta: CChanPlotMeta, ax: Axes, buy_color='r', sell_color='g', fontsize=18, arrow_l=0.2, arrow_h=0.25, arrow_w=1.2):
         self.bsp_common_draw(

@@ -1,0 +1,2 @@
+bsp3_bi_amp,bsp3_bi_amp_rate,bsp3_bi_klu_cnt,bsp3_zs_height,bsp_bi_amp,bsp_type,chain_id,chain_type,direction,is_buy,is_mature,is_segbsp,kdj_d,kdj_j,kdj_k,klu_close,klu_idx,macd_dea,macd_diff,macd_value,mature_rate,next_bi_return,parent_idx,point_index,ppo,rsi,timestamp,volume
+0.125,0.0041841004184100415,6,0.0016658719115757858,0.125,3a,,3a,sell,False,0,False,27.049877914637733,58.25824236708934,37.452666065454935,29.975000381469727,678,-0.05698128045106536,-0.05191872797431074,0.01012510495350924,,,,0,-0.0017305800266047063,46.24344562915182,2025/07/24 18:00,269033.0
