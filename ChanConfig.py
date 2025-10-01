@@ -17,6 +17,20 @@ from Math.DMI import CDMI
 from Math.ADLine import ADLine
 from Math.DemandIndex import DemandIndex
 from Math.STARC import STARC
+from Math.SMA import SMA
+from Math.EMA import EMA
+from Math.ATR import ATR
+from Math.Stochastic import Stochastic
+from Math.ROC import ROC
+from Math.Williams import WilliamsR
+from Math.CCI import CCI
+from Math.MFI import MFI
+from Math.TSI import TSI
+from Math.UO import UO
+from Math.PSAR import PSAR
+from Math.CandlestickPatterns import CandlestickPatterns
+from Math.PricePatterns import PricePatterns
+from Math.VolumePatterns import VolumePatterns
 
 from Math.TrendModel import CTrendModel
 from Seg.SegConfig import CSegConfig
@@ -51,6 +65,53 @@ class CChanConfig:
 
         self.cal_starc_vals = conf.get("cal_starc_vals", False)
         self.starc_cycle = conf.get("starc_cycle", 20)
+
+        # NEW TECHNICAL INDICATORS
+        self.cal_sma = conf.get("cal_sma", False)
+        self.sma_periods = conf.get("sma_periods", [5, 10, 20, 50])
+        
+        self.cal_ema = conf.get("cal_ema", False)
+        self.ema_periods = conf.get("ema_periods", [5, 10, 20, 50])
+        
+        self.cal_atr = conf.get("cal_atr", False)
+        self.atr_cycle = conf.get("atr_cycle", 14)
+        
+        self.cal_stochastic = conf.get("cal_stochastic", False)
+        self.stoch_k_period = conf.get("stoch_k_period", 14)
+        self.stoch_d_period = conf.get("stoch_d_period", 3)
+        
+        self.cal_roc = conf.get("cal_roc", False)
+        self.roc_periods = conf.get("roc_periods", [5, 10, 20])
+        
+        self.cal_williams = conf.get("cal_williams", False)
+        self.williams_cycle = conf.get("williams_cycle", 14)
+        
+        self.cal_cci = conf.get("cal_cci", False)
+        self.cci_cycle = conf.get("cci_cycle", 20)
+        
+        self.cal_mfi = conf.get("cal_mfi", False)
+        self.mfi_cycle = conf.get("mfi_cycle", 14)
+        
+        self.cal_tsi = conf.get("cal_tsi", False)
+        self.tsi_first_smooth = conf.get("tsi_first_smooth", 25)
+        self.tsi_second_smooth = conf.get("tsi_second_smooth", 13)
+        
+        self.cal_uo = conf.get("cal_uo", False)
+        self.uo_period1 = conf.get("uo_period1", 7)
+        self.uo_period2 = conf.get("uo_period2", 14)
+        self.uo_period3 = conf.get("uo_period3", 28)
+        
+        self.cal_psar = conf.get("cal_psar", False)
+        self.psar_af_start = conf.get("psar_af_start", 0.02)
+        self.psar_af_increment = conf.get("psar_af_increment", 0.02)
+        self.psar_af_max = conf.get("psar_af_max", 0.2)
+        
+        # PATTERN RECOGNITION
+        self.cal_candlestick_patterns = conf.get("cal_candlestick_patterns", False)
+        self.cal_price_patterns = conf.get("cal_price_patterns", False)
+        self.price_pattern_lookback = conf.get("price_pattern_lookback", 20)
+        self.cal_volume_patterns = conf.get("cal_volume_patterns", False)
+        self.volume_pattern_period = conf.get("volume_pattern_period", 20)
 
         self.bi_conf = CBiConfig(
             bi_algo=conf.get("bi_algo", "normal"),
@@ -142,6 +203,53 @@ class CChanConfig:
             res.append(KeltnerChannel(self.kc_cycle))
         if self.cal_starc_vals:
             res.append(STARC(self.starc_cycle))
+
+        if self.cal_sma:
+            for period in self.sma_periods:
+                res.append(SMA(period))
+                
+        if self.cal_ema:
+            for period in self.ema_periods:
+                res.append(EMA(period))
+                
+        if self.cal_atr:
+            res.append(ATR(self.atr_cycle))
+            
+        if self.cal_stochastic:
+            res.append(Stochastic(self.stoch_k_period, self.stoch_d_period))
+            
+        if self.cal_roc:
+            for period in self.roc_periods:
+                res.append(ROC(period))
+                
+        if self.cal_williams:
+            res.append(WilliamsR(self.williams_cycle))
+            
+        if self.cal_cci:
+            res.append(CCI(self.cci_cycle))
+            
+        if self.cal_mfi:
+            res.append(MFI(self.mfi_cycle))
+            
+        if self.cal_tsi:
+            res.append(TSI(self.tsi_first_smooth, self.tsi_second_smooth))
+            
+        if self.cal_uo:
+            res.append(UO(self.uo_period1, self.uo_period2, self.uo_period3))
+            
+        if self.cal_psar:
+            res.append(PSAR(self.psar_af_start, self.psar_af_increment, self.psar_af_max))
+            
+        # PATTERN RECOGNITION
+        if self.cal_candlestick_patterns:
+            res.append(CandlestickPatterns())
+            
+        if self.cal_price_patterns:
+            res.append(PricePatterns(self.price_pattern_lookback))
+            
+        if self.cal_volume_patterns:
+            res.append(VolumePatterns(self.volume_pattern_period))
+            
         return res
 
     def set_bsp_config(self, conf):

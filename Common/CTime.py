@@ -9,7 +9,7 @@ class CTime:
         self.hour = hour
         self.minute = minute
         self.second = second
-        self.auto = auto  # 自适应对天的理解
+        self.auto = False  # 自适应对天的理解
         self.set_timestamp()  # set self.ts
 
     def __str__(self):

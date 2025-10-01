@@ -1,0 +1,56 @@
+XGBoost Trading Signal Model - Summary Report
+================================================================================
+
+DATA:
+  Training samples: 4446 (validation: 1112)
+  Testing samples: 4303
+  Features used: 57
+
+MODEL PARAMETERS:
+  objective: reg:squarederror
+  max_depth: 6
+  learning_rate: 0.1
+  n_estimators: 200
+  min_child_weight: 3
+  subsample: 0.8
+  colsample_bytree: 0.8
+  gamma: 0.1
+  reg_alpha: 0.1
+  reg_lambda: 1.0
+  random_state: 42
+  n_jobs: -1
+  early_stopping_rounds: 20
+
+VALIDATION SET PERFORMANCE:
+  RMSE: 0.1680
+  MAE: 0.1065
+  R2: 0.5031
+  Accuracy: 79.4065
+
+TESTING SET PERFORMANCE:
+  RMSE: 0.3167
+  MAE: 0.2341
+  R2: -0.6282
+  Accuracy: 34.3017
+
+TOP 10 FEATURES:
+  53. macd_dif: 0.0478
+  12. feat_bsp2_break_bi_amp_rate: 0.0468
+  15. feat_bsp2s_bi_amp: 0.0336
+  38. feat_zs_cnt: 0.0315
+  21. feat_bsp2s_lv: 0.0304
+  16. feat_bsp2s_bi_amp_rate: 0.0291
+  48. klu_low: 0.0280
+  23. feat_bsp3_bi_amp: 0.0268
+  30. feat_kdj_j: 0.0243
+  50. klu_volume: 0.0242
+
+PERFORMANCE BY DIRECTION:
+  Buy:
+    Samples: 1657
+    Direction Accuracy: 29.03%
+    MAE: 0.2704%
+  Sell:
+    Samples: 2646
+    Direction Accuracy: 37.60%
+    MAE: 0.2113%

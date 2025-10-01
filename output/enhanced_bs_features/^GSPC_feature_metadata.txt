@@ -1,0 +1,94 @@
+ML Training Dataset Metadata
+========================================
+
+TRAINING FEATURES:
+--------------------
+  1. body_size
+  2. dmi_adx
+  3. dmi_minus
+  4. dmi_plus
+  5. dmi_trend_up
+  6. feat_bsp1_bi_amp
+  7. feat_bsp1_bi_amp_rate
+  8. feat_bsp1_bi_klu_cnt
+  9. feat_bsp2_bi_amp
+ 10. feat_bsp2_bi_amp_rate
+ 11. feat_bsp2_bi_klu_cnt
+ 12. feat_bsp2_break_bi_amp
+ 13. feat_bsp2_break_bi_amp_rate
+ 14. feat_bsp2_break_bi_bi_klu_cnt
+ 15. feat_bsp2_retrace_rate
+ 16. feat_bsp2s_bi_amp
+ 17. feat_bsp2s_bi_amp_rate
+ 18. feat_bsp2s_bi_klu_cnt
+ 19. feat_bsp2s_break_bi_amp
+ 20. feat_bsp2s_break_bi_amp_rate
+ 21. feat_bsp2s_break_bi_klu_cnt
+ 22. feat_bsp2s_lv
+ 23. feat_bsp2s_retrace_rate
+ 24. feat_bsp3_bi_amp
+ 25. feat_bsp3_bi_amp_rate
+ 26. feat_bsp3_bi_klu_cnt
+ 27. feat_bsp3_zs_height
+ 28. feat_bsp_bi_amp
+ 29. feat_divergence_rate
+ 30. feat_kdj_d
+ 31. feat_kdj_j
+ 32. feat_kdj_k
+ 33. feat_macd_dea
+ 34. feat_macd_diff
+ 35. feat_macd_value
+ 36. feat_next_bi_return
+ 37. feat_ppo
+ 38. feat_rsi
+ 39. feat_volume
+ 40. feat_zs_cnt
+ 41. has_profit_target
+ 42. high_low_spread_pct
+ 43. is_bullish_candle
+ 44. is_buy
+ 45. kdj_d
+ 46. kdj_j
+ 47. kdj_k
+ 48. kdj_overbought
+ 49. kdj_oversold
+ 50. klu_close
+ 51. klu_high
+ 52. klu_low
+ 53. klu_open
+ 54. klu_volume
+ 55. lower_shadow
+ 56. macd_dea
+ 57. macd_dif
+ 58. macd_signal
+ 59. macd_value
+ 60. price_change_pct
+ 61. profit_target_distance
+ 62. return_1
+ 63. return_10
+ 64. return_20
+ 65. return_5
+ 66. rsi
+ 67. rsi_overbought
+ 68. rsi_oversold
+ 69. upper_shadow
+ 70. volume_price_trend
+
+TARGET VARIABLES:
+--------------------
+  1. label_1
+  2. label_10
+  3. label_20
+  4. label_5
+  5. profit_target_pct
+  6. target_return_1
+  7. target_return_10
+  8. target_return_20
+  9. target_return_5
+
+RECOMMENDED USAGE:
+--------------------
+1. Primary Regression Target: profit_target_pct
+2. Classification Targets: label_5, label_10, etc.
+3. Filter: has_profit_target == 1 for valid samples
+4. Features: All columns except targets and metadata

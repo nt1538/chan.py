@@ -16,6 +16,20 @@ from Math.RSL import RSL
 from Math.DemandIndex import DemandIndex
 from Math.ADLine import ADLine
 from Math.STARC import STARC
+from Math.SMA import SMA
+from Math.EMA import EMA
+from Math.ATR import ATR
+from Math.Stochastic import Stochastic
+from Math.ROC import ROC
+from Math.Williams import WilliamsR
+from Math.CCI import CCI
+from Math.MFI import MFI
+from Math.TSI import TSI
+from Math.UO import UO
+from Math.PSAR import PSAR
+from Math.CandlestickPatterns import CandlestickPatterns
+from Math.PricePatterns import PricePatterns
+from Math.VolumePatterns import VolumePatterns
 
 from Math.TrendModel import CTrendModel
 
@@ -183,6 +197,59 @@ class CKLine_Unit:
                     self.starc_upper, self.starc_middle, self.starc_lower = self.starc_vals
                 else:
                     self.starc_upper = self.starc_middle = self.starc_lower = None
+            
+            # NEW INDICATORS
+            elif isinstance(metric_model, SMA):
+                period = metric_model.period
+                if not hasattr(self, 'sma'):
+                    self.sma = {}
+                self.sma[period] = metric_model.add(self.close)
+                
+            elif isinstance(metric_model, EMA):
+                period = metric_model.period
+                if not hasattr(self, 'ema'):
+                    self.ema = {}
+                self.ema[period] = metric_model.add(self.close)
+                
+            elif isinstance(metric_model, ATR):
+                self.atr = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, Stochastic):
+                self.stochastic = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, ROC):
+                period = metric_model.period
+                if not hasattr(self, 'roc'):
+                    self.roc = {}
+                self.roc[period] = metric_model.add(self.close)
+                
+            elif isinstance(metric_model, WilliamsR):
+                self.williams_r = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, CCI):
+                self.cci = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, MFI):
+                self.mfi = metric_model.add(self.high, self.low, self.close, self.volume)
+                
+            elif isinstance(metric_model, TSI):
+                self.tsi = metric_model.add(self.close)
+                
+            elif isinstance(metric_model, UO):
+                self.uo = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, PSAR):
+                self.psar = metric_model.add(self.high, self.low)
+                
+            # PATTERN RECOGNITION
+            elif isinstance(metric_model, CandlestickPatterns):
+                self.candlestick_patterns = metric_model.add(self.open, self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, PricePatterns):
+                self.price_patterns = metric_model.add(self.high, self.low, self.close)
+                
+            elif isinstance(metric_model, VolumePatterns):
+                self.volume_patterns = metric_model.add(self.close, self.volume)
 
 
 

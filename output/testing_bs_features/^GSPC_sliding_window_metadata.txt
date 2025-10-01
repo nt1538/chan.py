@@ -1,0 +1,38 @@
+Testing Dataset with Sliding Window
+==================================================
+
+SLIDING WINDOW CONFIGURATION:
+------------------------------
+Window Size: 1000 K-lines
+Final Window Position: idx 22711
+Total BSP Collected: 5454
+
+BENEFITS:
+------------------------------
+1. Memory Efficient: Only fixed K-lines in RAM
+2. Faster: Smaller Chan system to recalculate
+3. Complete: All BSP preserved (even from slid-out data)
+4. Scalable: Can process years of data
+
+DATASET CHARACTERISTICS:
+------------------------------
+This dataset is IDENTICAL to non-sliding version.
+Same features, same structure, same compatibility.
+The only difference is HOW it was generated (more efficiently).
+
+USAGE:
+------------------------------
+1. Contains BOTH mature and immature BS points
+2. Features match training dataset (no future data leak)
+3. profit_target_pct is ground truth for testing
+4. Filter has_profit_target==1 for valid test samples
+5. snapshot_first_seen shows when point first appeared
+
+CONFIGURATION:
+------------------------------
+Ticker: ^GSPC
+Period: 2024-01-01 to 2024-05-01
+Level: K_5M
+Window Size: 1000 K-lines
+Total Samples: 5454
+Samples with Targets: 5422

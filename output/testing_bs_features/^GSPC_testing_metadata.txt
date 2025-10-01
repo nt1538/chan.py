@@ -1,0 +1,95 @@
+Testing Dataset Metadata
+========================================
+
+GENERATION PROCESS:
+--------------------
+1. Ran step load and collected ALL BS points
+2. Includes both MATURE and IMMATURE points
+3. Extracted features without future data
+4. Calculated profit targets using next reverse signal
+
+DATASET INFO:
+--------------------
+Ticker: ^GSPC
+Period: 2024-05-01 to 2024-05-11
+Total samples: 449
+Samples with targets: 368
+
+FEATURES (no future data):
+--------------------
+  1. body_size
+  2. dmi_adx
+  3. dmi_minus
+  4. dmi_plus
+  5. dmi_trend_up
+  6. feat_bsp1_bi_amp
+  7. feat_bsp1_bi_amp_rate
+  8. feat_bsp1_bi_klu_cnt
+  9. feat_bsp2_bi_amp
+ 10. feat_bsp2_bi_amp_rate
+ 11. feat_bsp2_bi_klu_cnt
+ 12. feat_bsp2_break_bi_amp
+ 13. feat_bsp2_break_bi_amp_rate
+ 14. feat_bsp2_break_bi_bi_klu_cnt
+ 15. feat_bsp2_retrace_rate
+ 16. feat_bsp2s_bi_amp
+ 17. feat_bsp2s_bi_amp_rate
+ 18. feat_bsp2s_bi_klu_cnt
+ 19. feat_bsp2s_break_bi_amp
+ 20. feat_bsp2s_break_bi_amp_rate
+ 21. feat_bsp2s_break_bi_klu_cnt
+ 22. feat_bsp2s_lv
+ 23. feat_bsp2s_retrace_rate
+ 24. feat_bsp3_bi_amp
+ 25. feat_bsp3_bi_amp_rate
+ 26. feat_bsp3_bi_klu_cnt
+ 27. feat_bsp3_zs_height
+ 28. feat_bsp_bi_amp
+ 29. feat_divergence_rate
+ 30. feat_kdj_d
+ 31. feat_kdj_j
+ 32. feat_kdj_k
+ 33. feat_macd_dea
+ 34. feat_macd_diff
+ 35. feat_macd_value
+ 36. feat_ppo
+ 37. feat_rsi
+ 38. feat_volume
+ 39. feat_zs_cnt
+ 40. high_low_spread_pct
+ 41. is_bullish_candle
+ 42. is_buy
+ 43. kdj_d
+ 44. kdj_j
+ 45. kdj_k
+ 46. kdj_overbought
+ 47. kdj_oversold
+ 48. klu_close
+ 49. klu_high
+ 50. klu_idx
+ 51. klu_low
+ 52. klu_open
+ 53. klu_volume
+ 54. lower_shadow
+ 55. macd_dea
+ 56. macd_dif
+ 57. macd_signal
+ 58. macd_value
+ 59. price_change_pct
+ 60. rsi
+ 61. rsi_overbought
+ 62. rsi_oversold
+ 63. upper_shadow
+ 64. volume_price_trend
+
+TARGET VARIABLE:
+--------------------
+profit_target_pct: Percentage profit/loss to next reverse signal
+
+USAGE NOTES:
+--------------------
+1. Contains BOTH mature and immature BS points
+2. Features match training dataset (no future data leak)
+3. profit_target_pct is ground truth for testing
+4. Filter has_profit_target==1 for valid test samples
+5. snapshot_first_seen shows when point first appeared

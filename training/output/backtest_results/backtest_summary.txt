@@ -1,0 +1,24 @@
+Portfolio Backtesting Summary Report
+================================================================================
+
+STRATEGY PARAMETERS:
+  Profit Threshold: 1.2%
+  Position Size: 100%
+  Initial Capital: $10,000.00
+  Strategy: BUY on buy signals when predicted > threshold, SELL on sell signals
+
+ML TRADING STRATEGY:
+  Final Value: $10,000.00
+  Total Return: 0.00%
+  Max Drawdown: 0.00%
+  Total Trades: 0
+  Completed Trades: 0
+  Win Rate: 0.0%
+
+BUY & HOLD STRATEGY:
+  Final Value: $10,756.20
+  Total Return: 7.56%
+
+COMPARISON:
+  ML vs B&H: -7.56%
+  Outperformance: -7.03%
