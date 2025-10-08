@@ -1,0 +1,15 @@
+Enhanced Testing Dataset with Multi-Horizon Returns
+============================================================
+
+CONFIGURATION:
+----------------------------------------
+Ticker: ^GSPC
+Period: 2024-05-02 to 2024-06-01
+Level: K_5M
+Window Size: 1000 K-lines
+Horizons: [1, 5, 10, 20, 50, 100]
+Maturity Threshold: 2.0%
+Stability Window: 5
+
+KEY FEATURES:
+----------------------------------------

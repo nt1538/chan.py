@@ -4,8 +4,8 @@ Testing Dataset with Sliding Window
 SLIDING WINDOW CONFIGURATION:
 ------------------------------
 Window Size: 1000 K-lines
-Final Window Position: idx 22711
-Total BSP Collected: 5454
+Final Window Position: idx 4953
+Total BSP Collected: 1444
 
 BENEFITS:
 ------------------------------
@@ -31,8 +31,8 @@ USAGE:
 CONFIGURATION:
 ------------------------------
 Ticker: ^GSPC
-Period: 2024-01-01 to 2024-05-01
+Period: 2024-05-02 to 2024-06-01
 Level: K_5M
 Window Size: 1000 K-lines
-Total Samples: 5454
-Samples with Targets: 5422
+Total Samples: 1444
+Samples with Targets: 1424
