@@ -1,0 +1,42 @@
+Portfolio Backtesting Summary Report
+Separate Buy/Sell Model Strategy
+================================================================================
+
+STRATEGY PARAMETERS:
+  Buy Model Threshold:  0.5%
+  Sell Model Threshold: 0.5%
+  Position Size: 100%
+  Initial Capital: $10,000.00
+  Strategy: Use buy_model for entries, sell_model for exits
+  Note: Entry uses buy model, exit uses sell model
+
+DATA:
+  Test Period: 2023/04/03 02:05 to 2023/04/28 07:10
+  Total Days: 1121
+  ML Signals: 1121
+  Buy & Hold: Using full S&P 500 daily prices
+
+ML TRADING STRATEGY (Separate Models):
+  Final Value: $10,783.42
+  Total Return: 7.83%
+  Max Drawdown: 0.69%
+  Total Trades: 23
+  Completed Trades: 23
+  Win Rate: 91.3%
+  Skipped Buy Signals: 308
+  Skipped Sell Signals: 285
+  Average Trade Return: 0.33%
+  Median Trade Return: 0.18%
+  Best Trade: 1.39%
+  Worst Trade: -0.23%
+
+BUY & HOLD STRATEGY (S&P 500):
+  Entry Price: $4399.75
+  Final Price: $4412.00
+  Final Value: $10,027.84
+  Total Return: 0.28%
+  Data Source: Full daily S&P 500 prices
+
+COMPARISON:
+  ML vs B&H: +7.56%
+  Outperformance: +7.53%

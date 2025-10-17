@@ -1,0 +1,51 @@
+{
+  "buy_model": {
+    "model": "Buy Model",
+    "optimal_threshold": 1.7867281436920166,
+    "optimization_metric": "expectancy",
+    "performance": {
+      "expectancy": 1.8595743708837462,
+      "win_rate": 1.0,
+      "profit_factor": Infinity,
+      "avg_profit_per_trade": 1.8595743708837462,
+      "total_profit": 3.7191487417674924,
+      "num_trades": 2,
+      "sharpe_ratio": 239.34050234304877,
+      "direction_accuracy": 1.0
+    },
+    "alternative_thresholds": {
+      "aggressive": 0.5835453867912292,
+      "conservative": 0.5835453867912292,
+      "high_win_rate": 0.5835453867912292
+    }
+  },
+  "sell_model": {
+    "model": "Sell Model",
+    "optimal_threshold": 1.7635314464569092,
+    "optimization_metric": "expectancy",
+    "performance": {
+      "expectancy": 1.9157935804545447,
+      "win_rate": 1.0,
+      "profit_factor": Infinity,
+      "avg_profit_per_trade": 1.9157935804545447,
+      "total_profit": 5.747380741363634,
+      "num_trades": 3,
+      "sharpe_ratio": 744.8835359983879,
+      "direction_accuracy": 1.0
+    },
+    "alternative_thresholds": {
+      "aggressive": 0.037565670907497406,
+      "conservative": 0.48703593015670776,
+      "high_win_rate": 0.48703593015670776
+    }
+  },
+  "timestamp": "2025-10-09T16:56:38.306975",
+  "validation_samples": {
+    "buy": 54,
+    "sell": 86
+  },
+  "test_samples": {
+    "buy": 9,
+    "sell": 28
+  }
+}

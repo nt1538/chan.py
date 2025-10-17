@@ -1,0 +1,35 @@
+================================================================================
+XGBoost Training with Threshold Optimization - Summary Report
+================================================================================
+
+REGRESSION PERFORMANCE:
+--------------------------------------------------------------------------------
+Buy Model (Test):
+  RMSE: 0.2184%
+  MAE:  0.1410%
+  R²:   -0.0392
+
+Sell Model (Test):
+  RMSE: 0.8622%
+  MAE:  0.8006%
+  R²:   -6.0819
+
+OPTIMAL TRADING THRESHOLDS:
+--------------------------------------------------------------------------------
+
+Buy Model:
+  Optimal Threshold: 1.7867%
+  Win Rate: 100.00%
+  Expectancy: 1.8596%
+  Profit Factor: inf
+  Avg Profit/Trade: 1.8596%
+
+Sell Model:
+  Optimal Threshold: 1.7635%
+  Win Rate: 100.00%
+  Expectancy: 1.9158%
+  Profit Factor: inf
+  Avg Profit/Trade: 1.9158%
+
+TEST SET VERIFICATION:
+--------------------------------------------------------------------------------

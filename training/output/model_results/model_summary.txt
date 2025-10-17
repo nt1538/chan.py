@@ -2,8 +2,8 @@ XGBoost Trading Signal Model - Summary Report
 ================================================================================
 
 DATA:
-  Training samples: 3166 (validation: 792)
-  Testing samples: 1424
+  Training samples: 557 (validation: 140)
+  Testing samples: 37
   Features used: 59
 
 MODEL PARAMETERS:
@@ -22,35 +22,35 @@ MODEL PARAMETERS:
   early_stopping_rounds: 20
 
 VALIDATION SET PERFORMANCE:
-  RMSE: 0.1551
-  MAE: 0.1081
-  R2: 0.9058
-  Accuracy: 94.4444
+  RMSE: 0.2078
+  MAE: 0.1493
+  R2: 0.9042
+  Accuracy: 92.8571
 
 TESTING SET PERFORMANCE:
-  RMSE: 0.3343
-  MAE: 0.2540
-  R2: 0.2510
-  Accuracy: 83.7079
+  RMSE: 0.8374
+  MAE: 0.7064
+  R2: -6.1127
+  Accuracy: 89.1892
 
 TOP 10 FEATURES:
-  48. klu_close: 0.0550
-  50. klu_low: 0.0471
-  23. feat_bsp2s_lv: 0.0457
-  5. exit_klu_idx: 0.0437
-  37. feat_ppo: 0.0420
-  33. feat_kdj_k: 0.0415
-  6. exit_price: 0.0404
-  20. feat_bsp2s_break_bi_amp: 0.0377
-  16. feat_bsp2_retrace_rate: 0.0338
-  43. is_buy: 0.0325
+  51. klu_open: 0.0793
+  32. feat_kdj_j: 0.0738
+  40. feat_zs_cnt: 0.0736
+  43. is_buy: 0.0682
+  13. feat_bsp2_break_bi_amp: 0.0569
+  35. feat_macd_diff: 0.0354
+  36. feat_macd_value: 0.0334
+  50. klu_low: 0.0314
+  8. feat_bsp1_bi_amp_rate: 0.0308
+  6. exit_price: 0.0307
 
 PERFORMANCE BY DIRECTION:
   Buy:
-    Samples: 536
-    Direction Accuracy: 91.04%
-    MAE: 0.2620%
+    Samples: 9
+    Direction Accuracy: 100.00%
+    MAE: 0.1730%
   Sell:
-    Samples: 888
-    Direction Accuracy: 79.28%
-    MAE: 0.2492%
+    Samples: 28
+    Direction Accuracy: 85.71%
+    MAE: 0.8779%

@@ -1,0 +1,58 @@
+Separate Buy/Sell Models - Summary Report
+================================================================================
+
+DATA SPLIT:
+  Training:
+    Buy signals:    1791 samples
+    Sell signals:   2147 samples
+  Testing:
+    Buy signals:     627 samples
+    Sell signals:    494 samples
+
+BUY MODEL PERFORMANCE:
+  Validation:
+    RMSE: 0.1015%
+    MAE:  0.0698%
+    R²:   0.9768
+    Acc:  96.38%
+  Testing:
+    RMSE: 0.2855%
+    MAE:  0.2153%
+    R²:   0.6301
+    Acc:  95.06%
+
+SELL MODEL PERFORMANCE:
+  Validation:
+    RMSE: 0.1013%
+    MAE:  0.0715%
+    R²:   0.9790
+    Acc:  97.67%
+  Testing:
+    RMSE: 0.2241%
+    MAE:  0.1770%
+    R²:   0.6670
+    Acc:  88.87%
+
+TOP 10 BUY MODEL FEATURES:
+  50. klu_low                                 : 0.0681
+  35. feat_macd_diff                          : 0.0666
+  51. klu_open                                : 0.0546
+  20. feat_bsp2s_break_bi_amp                 : 0.0517
+   6. exit_price                              : 0.0504
+   5. exit_klu_idx                            : 0.0485
+  22. feat_bsp2s_break_bi_klu_cnt             : 0.0466
+  49. klu_high                                : 0.0448
+  48. klu_close                               : 0.0383
+  13. feat_bsp2_break_bi_amp                  : 0.0376
+
+TOP 10 SELL MODEL FEATURES:
+  20. feat_bsp2s_break_bi_amp                 : 0.0821
+  52. klu_volume                              : 0.0692
+  48. klu_close                               : 0.0660
+  21. feat_bsp2s_break_bi_amp_rate            : 0.0654
+   6. exit_price                              : 0.0537
+  49. klu_high                                : 0.0511
+  25. feat_bsp3_bi_amp                        : 0.0485
+   5. exit_klu_idx                            : 0.0427
+   1. body_size                               : 0.0383
+  22. feat_bsp2s_break_bi_klu_cnt             : 0.0351

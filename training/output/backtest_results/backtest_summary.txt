@@ -9,22 +9,22 @@ STRATEGY PARAMETERS:
   Note: Both entry AND exit require profit threshold
 
 ML TRADING STRATEGY:
-  Final Value: $10,688.91
-  Total Return: 6.89%
-  Max Drawdown: 0.70%
+  Final Value: $10,057.35
+  Total Return: 0.57%
+  Max Drawdown: 0.16%
   Total Trades: 4
   Completed Trades: 4
-  Win Rate: 75.0%
-  Skipped Sell Signals: 732
-  Average Trade Return: 1.69%
-  Median Trade Return: 1.46%
-  Best Trade: 4.17%
-  Worst Trade: -0.32%
+  Win Rate: 100.0%
+  Skipped Sell Signals: 0
+  Average Trade Return: 0.14%
+  Median Trade Return: 0.13%
+  Best Trade: 0.29%
+  Worst Trade: 0.03%
 
 BUY & HOLD STRATEGY:
-  Final Value: $10,265.62
-  Total Return: 2.66%
+  Final Value: $10,001.02
+  Total Return: 0.01%
 
 COMPARISON:
-  ML vs B&H: +4.23%
-  Outperformance: +4.12%
+  ML vs B&H: +0.56%
+  Outperformance: +0.56%
