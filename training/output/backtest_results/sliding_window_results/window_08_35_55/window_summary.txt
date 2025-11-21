@@ -1,0 +1,30 @@
+Window 8/17 Summary Report
+Period: 2024-11-19 to 2024-12-02
+Data Range: 35.0% - 55.0%
+================================================================================
+
+WINDOW STATISTICS:
+  Data points: 288
+  Trading signals: 304
+  - Buy signals: 116
+  - Sell signals: 188
+
+ML TRADING STRATEGY (Hybrid-Split Models):
+  Final Value: $10,000.00
+  Total Return: 0.00%
+  Max Drawdown: 0.00%
+  Total Trades: 0
+  Completed Trades: 0
+  Win Rate: 0.0%
+  Skipped Buy Signals: 116
+  Skipped Sell Signals: 0
+
+BUY & HOLD STRATEGY:
+  Entry Price: $588.04
+  Final Price: $603.73
+  Final Value: $10,266.73
+  Total Return: 2.67%
+
+COMPARISON:
+  ML vs B&H: -2.67%
+  Outperformance: -2.60%

@@ -1,0 +1,32 @@
+Three-Stage Model Training & Testing - Summary Report
+================================================================================
+
+DATA SPLIT STRATEGY:
+  Stage 1: 90.0% for Training & Validation
+  Stage 2: 5.0% for Threshold Optimization
+  Stage 3: 5.0% for Final Testing
+
+THRESHOLD OPTIMIZATION RESULTS:
+  Optimal Buy Threshold:  0.0%
+  Optimal Sell Threshold: 1.5%
+  Selected based on maximum outperformance vs Buy & Hold
+
+FINAL TEST RESULTS:
+  Total Return: 3.31%
+  Buy & Hold Return: 0.76%
+  Outperformance: +2.55%
+  Total Trades: 28
+  Win Rate: 53.6%
+  Average Trade Return: 0.12%
+
+BUY MODEL PERFORMANCE:
+  Training R²:    0.8806
+  Validation R²:  0.6105
+  Test R²:        -0.3523
+  Test Accuracy:  90.81%
+
+SELL MODEL PERFORMANCE:
+  Training R²:    0.8544
+  Validation R²:  0.5569
+  Test R²:        -1.0499
+  Test Accuracy:  90.66%

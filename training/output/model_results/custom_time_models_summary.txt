@@ -1,0 +1,94 @@
+Custom Time Period Buy/Sell Models - Summary Report
+================================================================================
+
+DATA SPLIT STRATEGY:
+  Training period: 2021-02-01 to 2021-04-30
+  Random split within training period: 85.0% train, 15.0% validation
+  Test1: 2 weeks (15 days) after training period
+  Test2: 2 weeks (15 days) after Test1 period
+
+DATA SPLIT:
+  Training set:
+    Total valid signals:   2102 samples
+    Buy signals:     823 samples ( 39.2%)
+    Sell signals:   1279 samples ( 60.8%)
+  Validation set:
+    Total valid signals:    371 samples
+    Buy signals:     150 samples ( 40.4%)
+    Sell signals:    221 samples ( 59.6%)
+  Test1 set:
+    Total valid signals:    361 samples
+    Buy signals:     185 samples ( 51.2%)
+    Sell signals:    176 samples ( 48.8%)
+  Test2 set:
+    Total valid signals:    442 samples
+    Buy signals:     217 samples ( 49.1%)
+    Sell signals:    225 samples ( 50.9%)
+
+BUY MODEL PERFORMANCE:
+  Training:
+    RMSE: 0.0087%
+    MAE:  0.0061%
+    R²:   0.9999
+    Acc:  99.64%
+  Validation:
+    RMSE: 0.2979%
+    MAE:  0.2013%
+    R²:   0.8160
+    Acc:  96.00%
+  Test1:
+    RMSE: 0.7923%
+    MAE:  0.6517%
+    R²:   0.0987
+    Acc:  86.49%
+  Test2:
+    RMSE: 0.6809%
+    MAE:  0.5069%
+    R²:   0.0671
+    Acc:  96.31%
+
+SELL MODEL PERFORMANCE:
+  Training:
+    RMSE: 0.0165%
+    MAE:  0.0117%
+    R²:   0.9995
+    Acc:  99.06%
+  Validation:
+    RMSE: 0.3712%
+    MAE:  0.2097%
+    R²:   0.7435
+    Acc:  93.67%
+  Test1:
+    RMSE: 1.2954%
+    MAE:  1.0385%
+    R²:   -0.3348
+    Acc:  82.95%
+  Test2:
+    RMSE: 0.7026%
+    MAE:  0.5357%
+    R²:   -0.2192
+    Acc:  84.00%
+
+TOP 10 BUY MODEL FEATURES:
+  55. klu_low                                 : 0.4102
+  45. feat_zs_cnt                             : 0.1267
+  56. klu_open                                : 0.0669
+  18. feat_bsp2_break_bi_amp_rate             : 0.0592
+   9. feat_break_bi_amp_rate                  : 0.0462
+   8. feat_break_bi_amp                       : 0.0250
+  54. klu_high                                : 0.0228
+  17. feat_bsp2_break_bi_amp                  : 0.0200
+  53. klu_close                               : 0.0178
+  16. feat_bsp2_bi_klu_cnt                    : 0.0161
+
+TOP 10 SELL MODEL FEATURES:
+  29. feat_bsp3_bi_amp                        : 0.2536
+  54. klu_high                                : 0.0720
+  12. feat_bsp1_bi_amp_rate                   : 0.0483
+  27. feat_bsp2s_lv                           : 0.0442
+  24. feat_bsp2s_break_bi_amp                 : 0.0400
+  53. klu_close                               : 0.0361
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0360
+  56. klu_open                                : 0.0323
+  34. feat_divergence_rate                    : 0.0319
+   8. feat_break_bi_amp                       : 0.0316

@@ -1,0 +1,42 @@
+Portfolio Backtesting Summary Report
+Hybrid-Split Model Strategy
+================================================================================
+
+STRATEGY PARAMETERS:
+  Buy Model Threshold:  1.2%
+  Sell Model Threshold: 1.0%
+  Position Size: 100%
+  Initial Capital: $10,000.00
+  Strategy: Use hybrid-split buy_model for entries, sell_model for exits
+  Note: Models trained using hybrid-split approach (chronological test, random train/val)
+
+DATA:
+  Test Period: 2021-05-17 04:00:00 to 2021-05-28 15:35:00
+  Total Price Points: 411
+  ML Signals: 442
+  - Buy signals:  217
+  - Sell signals: 225
+
+ML TRADING STRATEGY (Hybrid-Split Models):
+  Final Value: $10,234.79
+  Total Return: 2.35%
+  Max Drawdown: 0.56%
+  Total Trades: 2
+  Completed Trades: 2
+  Win Rate: 100.0%
+  Skipped Buy Signals: 190
+  Skipped Sell Signals: 30
+  Average Trade Return: 1.17%
+  Median Trade Return: 1.17%
+  Best Trade: 1.92%
+  Worst Trade: 0.42%
+
+BUY & HOLD STRATEGY:
+  Entry Price: $415.76
+  Final Price: $420.78
+  Final Value: $10,120.74
+  Total Return: 1.21%
+
+COMPARISON:
+  ML vs B&H: +1.14%
+  Outperformance: +1.13%

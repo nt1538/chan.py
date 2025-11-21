@@ -1,0 +1,50 @@
+Window 8 Summary Report
+================================================================================
+
+Window: 35%-55% of data
+Date Range: 2023-01-09 to 2023-08-07
+
+DATA SPLIT:
+  Training set: 4719 samples
+  Validation set: 833 samples
+  Test1 set: 308 samples
+  Test2 set: 309 samples
+
+  Valid Buy signals:  1912 train, 305 validation, 118 test1, 152 test2
+  Valid Sell signals: 2807 train, 528 validation, 190 test1, 157 test2
+
+BUY MODEL PERFORMANCE:
+  Training R²:   0.9958   (Acc: 98.48%)
+  Validation R²: 0.7570   (Acc: 93.44%)
+  Test1 R²:      -1.2078   (Acc: 98.31%)
+  Test2 R²:      -1.3431   (Acc: 82.24%)
+
+TOP 10 BUY MODEL FEATURES:
+  56. klu_open                                : 0.1058
+  55. klu_low                                 : 0.1005
+  54. klu_high                                : 0.0605
+  27. feat_bsp2s_lv                           : 0.0564
+  31. feat_bsp3_bi_klu_cnt                    : 0.0555
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0463
+  24. feat_bsp2s_break_bi_amp                 : 0.0366
+   9. feat_break_bi_amp_rate                  : 0.0340
+  22. feat_bsp2s_bi_amp_rate                  : 0.0291
+  17. feat_bsp2_break_bi_amp                  : 0.0286
+
+SELL MODEL PERFORMANCE:
+  Training R²:   0.9900   (Acc: 97.11%)
+  Validation R²: 0.7846   (Acc: 90.53%)
+  Test1 R²:      -1.7558   (Acc: 75.26%)
+  Test2 R²:      -1.0020   (Acc: 76.43%)
+
+TOP 10 SELL MODEL FEATURES:
+  24. feat_bsp2s_break_bi_amp                 : 0.1452
+  54. klu_high                                : 0.0928
+  56. klu_open                                : 0.0862
+  55. klu_low                                 : 0.0586
+   9. feat_break_bi_amp_rate                  : 0.0445
+  27. feat_bsp2s_lv                           : 0.0357
+  25. feat_bsp2s_break_bi_amp_rate            : 0.0290
+  34. feat_divergence_rate                    : 0.0287
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0282
+  15. feat_bsp2_bi_amp_rate                   : 0.0239

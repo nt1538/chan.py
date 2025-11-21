@@ -2,57 +2,60 @@ Separate Buy/Sell Models - Summary Report
 ================================================================================
 
 DATA SPLIT:
-  Training:
-    Buy signals:    1791 samples
-    Sell signals:   2147 samples
-  Testing:
-    Buy signals:     627 samples
-    Sell signals:    494 samples
+  Training (100% of training file):
+    Buy signals:    1190 samples
+    Sell signals:   1372 samples
+  Validation (50% of test file):
+    Buy signals:     251 samples
+    Sell signals:    184 samples
+  Testing (50% of test file):
+    Buy signals:     251 samples
+    Sell signals:    184 samples
 
 BUY MODEL PERFORMANCE:
   Validation:
-    RMSE: 0.1015%
-    MAE:  0.0698%
-    R²:   0.9768
-    Acc:  96.38%
+    RMSE: 1.1264%
+    MAE:  0.9094%
+    R²:   -0.0637
+    Acc:  76.49%
   Testing:
-    RMSE: 0.2855%
-    MAE:  0.2153%
-    R²:   0.6301
-    Acc:  95.06%
+    RMSE: 1.1501%
+    MAE:  0.8986%
+    R²:   -0.0088
+    Acc:  75.30%
 
 SELL MODEL PERFORMANCE:
   Validation:
-    RMSE: 0.1013%
-    MAE:  0.0715%
-    R²:   0.9790
-    Acc:  97.67%
+    RMSE: 1.1674%
+    MAE:  0.9090%
+    R²:   -0.0424
+    Acc:  95.65%
   Testing:
-    RMSE: 0.2241%
-    MAE:  0.1770%
-    R²:   0.6670
-    Acc:  88.87%
+    RMSE: 1.2278%
+    MAE:  0.9355%
+    R²:   -0.0307
+    Acc:  95.11%
 
 TOP 10 BUY MODEL FEATURES:
-  50. klu_low                                 : 0.0681
-  35. feat_macd_diff                          : 0.0666
-  51. klu_open                                : 0.0546
-  20. feat_bsp2s_break_bi_amp                 : 0.0517
-   6. exit_price                              : 0.0504
-   5. exit_klu_idx                            : 0.0485
-  22. feat_bsp2s_break_bi_klu_cnt             : 0.0466
-  49. klu_high                                : 0.0448
-  48. klu_close                               : 0.0383
-  13. feat_bsp2_break_bi_amp                  : 0.0376
+   1. klu_open                                : 0.1751
+   2. feat_bsp_bi_amp                         : 0.1005
+   3. klu_high                                : 0.0663
+   4. feat_break_bi_amp_rate                  : 0.0387
+   5. feat_bsp2_break_bi_amp_rate             : 0.0354
+   6. klu_low                                 : 0.0308
+   7. klu_close                               : 0.0296
+   8. feat_bsp3_bi_amp_rate                   : 0.0274
+   9. feat_bsp2s_break_bi_amp                 : 0.0265
+  10. feat_break_bi_amp                       : 0.0243
 
 TOP 10 SELL MODEL FEATURES:
-  20. feat_bsp2s_break_bi_amp                 : 0.0821
-  52. klu_volume                              : 0.0692
-  48. klu_close                               : 0.0660
-  21. feat_bsp2s_break_bi_amp_rate            : 0.0654
-   6. exit_price                              : 0.0537
-  49. klu_high                                : 0.0511
-  25. feat_bsp3_bi_amp                        : 0.0485
-   5. exit_klu_idx                            : 0.0427
-   1. body_size                               : 0.0383
-  22. feat_bsp2s_break_bi_klu_cnt             : 0.0351
+   1. feat_bsp2s_bi_amp_rate                  : 0.0492
+   2. klu_low                                 : 0.0441
+   3. klu_high                                : 0.0421
+   4. klu_open                                : 0.0389
+   5. feat_bsp2s_break_bi_amp                 : 0.0385
+   6. feat_bsp1_bi_amp                        : 0.0380
+   7. feat_bsp2s_break_bi_klu_cnt             : 0.0323
+   8. feat_ppo                                : 0.0311
+   9. feat_bsp1_bi_amp_rate                   : 0.0300
+  10. klu_close                               : 0.0298

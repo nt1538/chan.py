@@ -1,0 +1,78 @@
+Hybrid-Split Buy/Sell Models - Summary Report
+================================================================================
+
+DATA SPLIT STRATEGY:
+  Last 5.0% of chronological data reserved for testing
+  Remaining 95.0% randomly split into 80.0% train and 15.0% validation
+
+DATA SPLIT:
+  Training set:
+    Total valid signals:  24677 samples
+    Buy signals:   11148 samples ( 45.2%)
+    Sell signals:  13529 samples ( 54.8%)
+  Validation set:
+    Total valid signals:   4627 samples
+    Buy signals:    2072 samples ( 44.8%)
+    Sell signals:   2555 samples ( 55.2%)
+  Testing set:
+    Total valid signals:   1541 samples
+    Buy signals:     709 samples ( 46.0%)
+    Sell signals:    832 samples ( 54.0%)
+
+BUY MODEL PERFORMANCE:
+  Training:
+    RMSE: 0.3523%
+    MAE:  0.2488%
+    R²:   0.8695
+    Acc:  94.01%
+  Validation:
+    RMSE: 0.5981%
+    MAE:  0.4263%
+    R²:   0.5757
+    Acc:  91.31%
+  Testing:
+    RMSE: 0.9486%
+    MAE:  0.6781%
+    R²:   -0.0982
+    Acc:  81.95%
+
+SELL MODEL PERFORMANCE:
+  Training:
+    RMSE: 0.4042%
+    MAE:  0.2824%
+    R²:   0.8398
+    Acc:  91.51%
+  Validation:
+    RMSE: 0.6600%
+    MAE:  0.4586%
+    R²:   0.5794
+    Acc:  89.75%
+  Testing:
+    RMSE: 1.0180%
+    MAE:  0.7527%
+    R²:   -0.2361
+    Acc:  83.65%
+
+TOP 10 BUY MODEL FEATURES:
+  56. klu_open                                : 0.1021
+  55. klu_low                                 : 0.0719
+  30. feat_bsp3_bi_amp_rate                   : 0.0532
+  54. klu_high                                : 0.0383
+  24. feat_bsp2s_break_bi_amp                 : 0.0382
+  25. feat_bsp2s_break_bi_amp_rate            : 0.0308
+   9. feat_break_bi_amp_rate                  : 0.0287
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0280
+   8. feat_break_bi_amp                       : 0.0272
+  22. feat_bsp2s_bi_amp_rate                  : 0.0265
+
+TOP 10 SELL MODEL FEATURES:
+  55. klu_low                                 : 0.0485
+  24. feat_bsp2s_break_bi_amp                 : 0.0461
+   8. feat_break_bi_amp                       : 0.0406
+  25. feat_bsp2s_break_bi_amp_rate            : 0.0388
+  31. feat_bsp3_bi_klu_cnt                    : 0.0372
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0326
+  46. high_low_spread_pct                     : 0.0309
+  45. feat_zs_cnt                             : 0.0306
+   9. feat_break_bi_amp_rate                  : 0.0240
+  19. feat_bsp2_break_bi_bi_klu_cnt           : 0.0238

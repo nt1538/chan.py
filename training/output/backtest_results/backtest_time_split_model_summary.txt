@@ -1,0 +1,38 @@
+Portfolio Backtesting Summary Report
+Time-Split Model Strategy
+================================================================================
+
+STRATEGY PARAMETERS:
+  Buy Model Threshold:  2%
+  Sell Model Threshold: 2%
+  Position Size: 100%
+  Initial Capital: $10,000.00
+  Strategy: Use buy_model for entries, sell_model for exits
+  Note: Models trained using time-split approach
+
+DATA:
+  Test Period: 2022-03-18 18:35:00 to 2022-04-01 15:35:00
+  Total Price Points: 369
+  ML Signals: 382
+  - Buy signals:  208
+  - Sell signals: 174
+
+ML TRADING STRATEGY (Time-Split Models):
+  Final Value: $10,000.00
+  Total Return: 0.00%
+  Max Drawdown: 0.00%
+  Total Trades: 0
+  Completed Trades: 0
+  Win Rate: 0.0%
+  Skipped Buy Signals: 208
+  Skipped Sell Signals: 0
+
+BUY & HOLD STRATEGY:
+  Entry Price: $445.38
+  Final Price: $450.62
+  Final Value: $10,117.65
+  Total Return: 1.18%
+
+COMPARISON:
+  ML vs B&H: -1.18%
+  Outperformance: -1.16%

@@ -1,0 +1,35 @@
+Testing Dataset with BEST within 24h Logic
+==================================================
+
+PROFIT TARGET CALCULATION:
+------------------------------
+Method: BEST reverse signal within 288 bars (~24 hours)
+Logic:
+  - BUY signals: Find SELL with HIGHEST price in window
+  - SELL signals: Find BUY with LOWEST price in window
+  - Fallback: Uses next reverse if no signal in window
+
+ADVANTAGES over 'Next Reverse' method:
+------------------------------
+1. Captures MAXIMUM profit potential within timeframe
+2. More realistic (traders wait for best exit, not just first)
+3. Aligned with actual trading behavior
+4. Still time-constrained (24h) to avoid overfitting
+
+SLIDING WINDOW CONFIGURATION:
+------------------------------
+Window Size: 1000 K-lines
+Final Window Position: idx 2619
+Total BSP Collected: 685
+
+CONFIGURATION:
+------------------------------
+Ticker: SPY
+Period: 2022-07-02 to 2022-07-30
+Level: K_5M
+Time Window: 288 bars (~24 hours)
+Total Samples: 685
+Samples with Targets: 660
+
+Exit Type Distribution:
+  best_24h: 660 (96.4%)

@@ -1,0 +1,50 @@
+Window 14 Summary Report
+================================================================================
+
+Window: 65%-85% of data
+Date Range: 2023-11-20 to 2024-07-17
+
+DATA SPLIT:
+  Training set: 4719 samples
+  Validation set: 833 samples
+  Test1 set: 308 samples
+  Test2 set: 309 samples
+
+  Valid Buy signals:  1982 train, 377 validation, 167 test1, 89 test2
+  Valid Sell signals: 2737 train, 456 validation, 141 test1, 220 test2
+
+BUY MODEL PERFORMANCE:
+  Training R²:   0.9938   (Acc: 98.84%)
+  Validation R²: 0.7224   (Acc: 94.69%)
+  Test1 R²:      -0.5344   (Acc: 97.60%)
+  Test2 R²:      -4.5599   (Acc: 92.13%)
+
+TOP 10 BUY MODEL FEATURES:
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.1087
+  55. klu_low                                 : 0.0712
+  45. feat_zs_cnt                             : 0.0686
+  25. feat_bsp2s_break_bi_amp_rate            : 0.0534
+  56. klu_open                                : 0.0523
+  24. feat_bsp2s_break_bi_amp                 : 0.0370
+  16. feat_bsp2_bi_klu_cnt                    : 0.0355
+  54. klu_high                                : 0.0333
+   8. feat_break_bi_amp                       : 0.0308
+  34. feat_divergence_rate                    : 0.0255
+
+SELL MODEL PERFORMANCE:
+  Training R²:   0.9915   (Acc: 97.52%)
+  Validation R²: 0.7510   (Acc: 94.08%)
+  Test1 R²:      -0.2812   (Acc: 90.07%)
+  Test2 R²:      -1.1420   (Acc: 82.73%)
+
+TOP 10 SELL MODEL FEATURES:
+  54. klu_high                                : 0.0943
+  24. feat_bsp2s_break_bi_amp                 : 0.0515
+  56. klu_open                                : 0.0454
+  26. feat_bsp2s_break_bi_klu_cnt             : 0.0406
+  55. klu_low                                 : 0.0387
+  38. feat_level                              : 0.0380
+   8. feat_break_bi_amp                       : 0.0352
+   9. feat_break_bi_amp_rate                  : 0.0337
+  45. feat_zs_cnt                             : 0.0336
+  53. klu_close                               : 0.0330

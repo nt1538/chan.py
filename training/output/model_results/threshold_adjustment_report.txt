@@ -1,0 +1,103 @@
+Model Prediction Bias Analysis & Threshold Adjustment Report
+================================================================================
+
+DATA SPLIT:
+  Training:
+    Buy signals:    1190 samples
+    Sell signals:   1372 samples
+  Testing:
+    Buy signals:     502 samples
+    Sell signals:    368 samples
+
+BUY MODEL PERFORMANCE:
+  Validation:
+    RMSE: 0.5217%
+    MAE:  0.3914%
+    R²:   0.8380
+    Acc:  90.76%
+    Mean Bias: +0.0252%
+    Aggressive Predictions: 50.4%
+    Passive Predictions: 49.6%
+  Testing:
+    RMSE: 1.1877%
+    MAE:  0.9421%
+    R²:   -0.1259
+    Acc:  75.70%
+    Mean Bias: +0.6405%
+    Aggressive Predictions: 72.5%
+    Passive Predictions: 27.5%
+
+SELL MODEL PERFORMANCE:
+  Validation:
+    RMSE: 0.8014%
+    MAE:  0.5068%
+    R²:   0.5990
+    Acc:  94.18%
+    Mean Bias: -0.0308%
+    Aggressive Predictions: 51.3%
+    Passive Predictions: 48.7%
+  Testing:
+    RMSE: 1.3681%
+    MAE:  1.0568%
+    R²:   -0.3514
+    Acc:  92.39%
+    Mean Bias: -0.3099%
+    Aggressive Predictions: 43.5%
+    Passive Predictions: 56.5%
+
+TOP 10 BUY MODEL FEATURES:
+  57. klu_open                                : 0.1461
+  56. klu_low                                 : 0.0836
+  55. klu_high                                : 0.0657
+  34. feat_bsp_type                           : 0.0522
+   8. feat_break_bi_amp                       : 0.0513
+   9. feat_break_bi_amp_rate                  : 0.0485
+  24. feat_bsp2s_break_bi_amp                 : 0.0377
+  30. feat_bsp3_bi_amp_rate                   : 0.0329
+  29. feat_bsp3_bi_amp                        : 0.0322
+  33. feat_bsp_bi_amp                         : 0.0272
+
+TOP 10 SELL MODEL FEATURES:
+  21. feat_bsp2s_bi_amp                       : 0.0582
+  34. feat_bsp_type                           : 0.0458
+  33. feat_bsp_bi_amp                         : 0.0445
+  11. feat_bsp1_bi_amp                        : 0.0423
+  56. klu_low                                 : 0.0420
+  22. feat_bsp2s_bi_amp_rate                  : 0.0408
+  32. feat_bsp3_zs_height                     : 0.0355
+  24. feat_bsp2s_break_bi_amp                 : 0.0352
+  57. klu_open                                : 0.0337
+  55. klu_high                                : 0.0288
+
+================================================================================
+THRESHOLD ADJUSTMENT RECOMMENDATIONS
+================================================================================
+
+Based on the prediction bias analysis, here are the recommended threshold adjustments:
+
+BUY MODEL:
+  - RECOMMENDATION: INCREASE profit threshold by 0.6405%
+  - REASON: Model is AGGRESSIVE (overestimates) by an average of 0.6405%
+  - 72.5% of predictions are aggressive with average magnitude of +1.0913%
+
+SELL MODEL:
+  - RECOMMENDATION: DECREASE profit threshold by 0.3099%
+  - REASON: Model is PASSIVE (underestimates) by an average of -0.3099%
+  - 56.5% of predictions are passive with average magnitude of -1.2090%
+
+================================================================================
+IMPLEMENTATION GUIDE
+================================================================================
+
+To implement these threshold adjustments in your trading system:
+
+1. For BUY signals:
+   - Add 0.6405% to your current profit target threshold
+   - Example: If current threshold is 1.0%, new threshold should be 1.6405%
+
+2. For SELL signals:
+   - Subtract 0.3099% from your current profit target threshold
+   - Example: If current threshold is 1.0%, new threshold should be 0.6901%
+
+Note: These adjustments correct for the model's systematic bias and should improve your trading results.
+For best results, re-evaluate the bias metrics periodically as market conditions change.

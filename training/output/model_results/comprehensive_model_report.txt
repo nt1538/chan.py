@@ -1,0 +1,186 @@
+COMPREHENSIVE MODEL EVALUATION REPORT
+================================================================================
+
+DATA SUMMARY:
+----------------------------------------
+Training data: 2565 samples, 79 columns
+Testing data: 894 samples, 79 columns
+Feature count: 65
+
+Training split:
+  Buy signals:    1190 samples ( 46.4%)
+  Sell signals:   1372 samples ( 53.6%)
+
+Testing split:
+  Buy signals:     502 samples ( 57.7%)
+  Sell signals:    368 samples ( 42.3%)
+
+BUY MODEL PERFORMANCE:
+----------------------------------------
+Validation Set:
+  Standard Metrics:
+    RMSE: 0.5217%
+    MAE:  0.3914%
+    R²:   0.8380
+
+  Trading Metrics:
+    Direction Accuracy: 90.76%
+    Profit Detection:   82.35%
+    Loss Detection:     8.40%
+    Avg Predicted Profit: +1.3153%
+    Avg Actual Profit:    +1.3969%
+
+  Prediction Bias Analysis:
+    Mean Bias: +0.0252%
+    Median Bias: +0.0033%
+    Aggressive Predictions: 50.4%
+    Passive Predictions:    49.6%
+    Avg Overestimation:     +0.4132%
+    Avg Underestimation:    -0.3693%
+
+Testing Set:
+  Standard Metrics:
+    RMSE: 1.1877%
+    MAE:  0.9421%
+    R²:   -0.1259
+
+  Trading Metrics:
+    Direction Accuracy: 75.70%
+    Profit Detection:   74.90%
+    Loss Detection:     0.80%
+    Avg Predicted Profit: +1.3196%
+    Avg Actual Profit:    +1.1133%
+
+  Prediction Bias Analysis:
+    Mean Bias: +0.6405%
+    Median Bias: +0.6741%
+    Aggressive Predictions: 72.5%
+    Passive Predictions:    27.5%
+    Avg Overestimation:     +1.0913%
+    Avg Underestimation:    -0.5484%
+
+SELL MODEL PERFORMANCE:
+----------------------------------------
+Validation Set:
+  Standard Metrics:
+    RMSE: 0.8014%
+    MAE:  0.5068%
+    R²:   0.5990
+
+  Trading Metrics:
+    Direction Accuracy: 94.18%
+    Profit Detection:   93.45%
+    Loss Detection:     0.73%
+    Avg Predicted Profit: +1.4968%
+    Avg Actual Profit:    +1.6356%
+
+  Prediction Bias Analysis:
+    Mean Bias: -0.0308%
+    Median Bias: +0.0192%
+    Aggressive Predictions: 51.3%
+    Passive Predictions:    48.7%
+    Avg Overestimation:     +0.4641%
+    Avg Underestimation:    -0.5516%
+
+Testing Set:
+  Standard Metrics:
+    RMSE: 1.3681%
+    MAE:  1.0568%
+    R²:   -0.3514
+
+  Trading Metrics:
+    Direction Accuracy: 92.39%
+    Profit Detection:   92.12%
+    Loss Detection:     0.27%
+    Avg Predicted Profit: +1.3905%
+    Avg Actual Profit:    +1.7399%
+
+  Prediction Bias Analysis:
+    Mean Bias: -0.3099%
+    Median Bias: -0.2131%
+    Aggressive Predictions: 43.5%
+    Passive Predictions:    56.5%
+    Avg Overestimation:     +0.8590%
+    Avg Underestimation:    -1.2090%
+
+MODEL COMPARISON:
+----------------------------------------
+* BUY model performs significantly better (R² diff: 0.226)
+* SELL model has better direction accuracy (16.7% difference)
+* SELL model has less prediction bias (0.3307 difference)
+
+FEATURE IMPORTANCE:
+----------------------------------------
+Top 10 Features - BUY Model:
+  57. klu_open                                : 0.1461
+  56. klu_low                                 : 0.0836
+  55. klu_high                                : 0.0657
+  34. feat_bsp_type                           : 0.0522
+   8. feat_break_bi_amp                       : 0.0513
+   9. feat_break_bi_amp_rate                  : 0.0485
+  24. feat_bsp2s_break_bi_amp                 : 0.0377
+  30. feat_bsp3_bi_amp_rate                   : 0.0329
+  29. feat_bsp3_bi_amp                        : 0.0322
+  33. feat_bsp_bi_amp                         : 0.0272
+
+Top 10 Features - SELL Model:
+  21. feat_bsp2s_bi_amp                       : 0.0582
+
+  34. feat_bsp_type                           : 0.0458
+
+  33. feat_bsp_bi_amp                         : 0.0445
+
+  11. feat_bsp1_bi_amp                        : 0.0423
+
+  56. klu_low                                 : 0.0420
+
+  22. feat_bsp2s_bi_amp_rate                  : 0.0408
+
+  32. feat_bsp3_zs_height                     : 0.0355
+
+  24. feat_bsp2s_break_bi_amp                 : 0.0352
+
+  57. klu_open                                : 0.0337
+
+  55. klu_high                                : 0.0288
+
+Common Important Features (in both top 10 lists): 6
+  * feat_bsp_type: Buy rank #34 (0.0522), Sell rank #34 (0.0458)
+  * feat_bsp_bi_amp: Buy rank #33 (0.0272), Sell rank #33 (0.0445)
+  * klu_low: Buy rank #56 (0.0836), Sell rank #56 (0.0420)
+  * klu_high: Buy rank #55 (0.0657), Sell rank #55 (0.0288)
+  * klu_open: Buy rank #57 (0.1461), Sell rank #57 (0.0337)
+  * feat_bsp2s_break_bi_amp: Buy rank #24 (0.0377), Sell rank #24 (0.0352)
+
+================================================================================
+THRESHOLD ADJUSTMENT RECOMMENDATIONS
+================================================================================
+
+Based on the prediction bias analysis, here are the recommended threshold adjustments:
+
+BUY MODEL:
+  - RECOMMENDATION: INCREASE profit threshold by 0.6405%
+  - REASON: Model is AGGRESSIVE (overestimates) by an average of 0.6405%
+  - 72.5% of predictions are aggressive with average magnitude of +1.0913%
+
+SELL MODEL:
+  - RECOMMENDATION: DECREASE profit threshold by 0.3099%
+  - REASON: Model is PASSIVE (underestimates) by an average of -0.3099%
+  - 56.5% of predictions are passive with average magnitude of -1.2090%
+
+================================================================================
+IMPLEMENTATION GUIDE
+================================================================================
+
+To implement these threshold adjustments in your trading system:
+
+1. For BUY signals:
+   - Add 0.6405% to your current profit target threshold
+   - Example: If current threshold is 1.0%, new threshold should be 1.6405%
+
+2. For SELL signals:
+   - Subtract 0.3099% from your current profit target threshold
+   - Example: If current threshold is 1.0%, new threshold should be 0.6901%
+
+Note: These adjustments correct for the model's systematic bias and should improve your trading results.
+For best results, re-evaluate the bias metrics periodically as market conditions change.

@@ -1,0 +1,2 @@
+entry_idx,entry_klu_idx,entry_timestamp,direction,entry_price,predicted_profit,position_size,shares,model_used,exit_idx,exit_klu_idx,exit_timestamp,exit_price,exit_predicted_profit,actual_profit,trade_profit,trade_return_pct,model_used_exit
+35,134440.0,2024-10-31 10:25:00,buy,571.99,1.6005076,10000,17.482823126278433,buy_model,167,135160.0,2024-11-06 07:40:00,589.75,1.9108826,-0.1119118270453528,310.4949387227043,3.104949387227043,sell_model

@@ -1,0 +1,224 @@
+Daily Rolling Window Backtest Summary
+================================================================================
+
+CONFIGURATION:
+  Training window: 30 days
+  Rolling period: 200 days
+  Position size: 100.0%
+  Initial capital: $10000
+
+OVERALL PERFORMANCE:
+  Total days analyzed: 200
+  Backtest period: 2022-02-17 to 2022-12-02
+  Strategy cumulative return: 93.79%
+  Buy & Hold cumulative return: -8.60%
+    Start: $444.13 on 2022-02-17
+    End: $405.93 on 2022-12-02
+  Strategy vs. Buy & Hold: +102.39%
+  Win rate (positive return days): 58.5%
+  Outperformance rate (days beating Buy & Hold): 62.0%
+
+DAILY RESULTS:
+  Day 1 (2022-02-17): Strategy 0.00%, B&H -1.66% ($444.13 -> $436.75), Diff +1.66%, Thresholds: Buy=1.90%, Sell=1.20%
+  Day 2 (2022-02-18): Strategy -0.03%, B&H -0.03% ($436.44 -> $436.33), Diff -0.00%, Thresholds: Buy=2.00%, Sell=2.00%
+  Day 3 (2022-02-22): Strategy 1.28%, B&H 0.75% ($428.71 -> $431.94), Diff +0.52%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 4 (2022-02-23): Strategy -1.78%, B&H -3.35% ($433.39 -> $418.85), Diff +1.57%, Thresholds: Buy=-0.50%, Sell=1.10%
+  Day 5 (2022-02-24): Strategy 3.64%, B&H 2.75% ($414.51 -> $425.90), Diff +0.89%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 6 (2022-02-25): Strategy 1.90%, B&H 3.54% ($423.31 -> $438.30), Diff -1.64%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 7 (2022-02-28): Strategy 1.31%, B&H 0.89% ($432.14 -> $436.00), Diff +0.41%, Thresholds: Buy=-0.50%, Sell=1.70%
+  Day 8 (2022-03-01): Strategy 0.85%, B&H -1.49% ($435.76 -> $429.27), Diff +2.34%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 9 (2022-03-02): Strategy 2.82%, B&H 1.84% ($429.11 -> $437.00), Diff +0.99%, Thresholds: Buy=1.70%, Sell=2.00%
+  Day 10 (2022-03-03): Strategy -0.90%, B&H -1.87% ($437.39 -> $429.21), Diff +0.97%, Thresholds: Buy=1.50%, Sell=2.00%
+  Day 11 (2022-03-04): Strategy -0.07%, B&H -0.12% ($432.77 -> $432.24), Diff +0.06%, Thresholds: Buy=1.60%, Sell=1.10%
+  Day 12 (2022-03-07): Strategy 0.71%, B&H -1.81% ($425.72 -> $418.01), Diff +2.52%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 13 (2022-03-08): Strategy 0.18%, B&H -0.65% ($420.20 -> $417.45), Diff +0.83%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 14 (2022-03-09): Strategy 0.87%, B&H 1.68% ($422.00 -> $429.09), Diff -0.81%, Thresholds: Buy=-0.50%, Sell=1.20%
+  Day 15 (2022-03-10): Strategy 0.20%, B&H 0.53% ($424.05 -> $426.29), Diff -0.33%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 16 (2022-03-11): Strategy -1.10%, B&H -1.51% ($426.50 -> $420.08), Diff +0.41%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 17 (2022-03-14): Strategy 0.65%, B&H -1.34% ($423.61 -> $417.94), Diff +1.99%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 18 (2022-03-15): Strategy 2.55%, B&H 2.55% ($415.62 -> $426.22), Diff +0.00%, Thresholds: Buy=2.00%, Sell=1.90%
+  Day 19 (2022-03-16): Strategy 1.04%, B&H 1.55% ($429.59 -> $436.25), Diff -0.51%, Thresholds: Buy=-0.50%, Sell=1.70%
+  Day 20 (2022-03-17): Strategy 0.57%, B&H 0.74% ($435.32 -> $438.55), Diff -0.17%, Thresholds: Buy=-0.50%, Sell=1.30%
+  Day 21 (2022-03-18): Strategy 1.80%, B&H 1.80% ($437.63 -> $445.49), Diff +0.00%, Thresholds: Buy=-0.50%, Sell=1.90%
+  Day 22 (2022-03-21): Strategy -0.32%, B&H 0.01% ($443.65 -> $443.70), Diff -0.33%, Thresholds: Buy=1.20%, Sell=1.50%
+  Day 23 (2022-03-22): Strategy 0.27%, B&H 0.84% ($445.44 -> $449.19), Diff -0.57%, Thresholds: Buy=1.70%, Sell=1.80%
+  Day 24 (2022-03-23): Strategy 0.00%, B&H -0.82% ($448.00 -> $444.34), Diff +0.82%, Thresholds: Buy=2.00%, Sell=1.80%
+  Day 25 (2022-03-24): Strategy 0.54%, B&H 0.82% ($446.40 -> $450.04), Diff -0.28%, Thresholds: Buy=-0.50%, Sell=1.30%
+  Day 26 (2022-03-25): Strategy 0.68%, B&H 0.47% ($450.81 -> $452.95), Diff +0.20%, Thresholds: Buy=-0.50%, Sell=1.90%
+  Day 27 (2022-03-28): Strategy 0.05%, B&H 0.41% ($451.43 -> $453.29), Diff -0.36%, Thresholds: Buy=-0.50%, Sell=1.60%
+  Day 28 (2022-03-29): Strategy 0.94%, B&H 0.86% ($457.19 -> $461.10), Diff +0.09%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 29 (2022-03-30): Strategy -0.67%, B&H -0.67% ($459.64 -> $456.57), Diff -0.00%, Thresholds: Buy=1.60%, Sell=0.90%
+  Day 30 (2022-03-31): Strategy 0.00%, B&H -1.71% ($459.49 -> $451.65), Diff +1.71%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 31 (2022-04-01): Strategy 0.00%, B&H -0.22% ($454.31 -> $453.29), Diff +0.22%, Thresholds: Buy=2.00%, Sell=0.80%
+  Day 32 (2022-04-04): Strategy 0.71%, B&H 0.96% ($452.20 -> $456.55), Diff -0.25%, Thresholds: Buy=1.90%, Sell=1.10%
+  Day 33 (2022-04-05): Strategy -0.39%, B&H -1.36% ($457.11 -> $450.89), Diff +0.97%, Thresholds: Buy=1.40%, Sell=1.40%
+  Day 34 (2022-04-06): Strategy 0.30%, B&H -0.95% ($449.49 -> $445.20), Diff +1.26%, Thresholds: Buy=1.70%, Sell=-0.50%
+  Day 35 (2022-04-07): Strategy 0.00%, B&H 0.35% ($446.72 -> $448.30), Diff -0.35%, Thresholds: Buy=2.00%, Sell=0.50%
+  Day 36 (2022-04-08): Strategy 0.47%, B&H -0.69% ($450.71 -> $447.62), Diff +1.15%, Thresholds: Buy=1.40%, Sell=0.90%
+  Day 37 (2022-04-11): Strategy -1.09%, B&H -1.36% ($446.02 -> $439.97), Diff +0.27%, Thresholds: Buy=1.10%, Sell=0.80%
+  Day 38 (2022-04-12): Strategy 0.26%, B&H -0.26% ($438.20 -> $437.06), Diff +0.52%, Thresholds: Buy=1.90%, Sell=1.00%
+  Day 39 (2022-04-13): Strategy 0.00%, B&H 0.55% ($440.94 -> $443.35), Diff -0.55%, Thresholds: Buy=1.90%, Sell=1.60%
+  Day 40 (2022-04-14): Strategy 0.00%, B&H -1.28% ($443.36 -> $437.69), Diff +1.28%, Thresholds: Buy=1.80%, Sell=1.20%
+  Day 41 (2022-04-18): Strategy 0.71%, B&H 0.83% ($436.48 -> $440.12), Diff -0.12%, Thresholds: Buy=1.60%, Sell=-0.50%
+  Day 42 (2022-04-19): Strategy 0.78%, B&H 1.61% ($437.88 -> $444.93), Diff -0.83%, Thresholds: Buy=1.50%, Sell=0.90%
+  Day 43 (2022-04-20): Strategy 0.00%, B&H 0.73% ($442.97 -> $446.22), Diff -0.73%, Thresholds: Buy=1.60%, Sell=1.90%
+  Day 44 (2022-04-21): Strategy -0.70%, B&H -2.47% ($448.03 -> $436.95), Diff +1.77%, Thresholds: Buy=1.40%, Sell=0.70%
+  Day 45 (2022-04-22): Strategy -0.45%, B&H -2.83% ($436.76 -> $424.42), Diff +2.38%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 46 (2022-04-25): Strategy 0.47%, B&H 1.32% ($423.06 -> $428.64), Diff -0.85%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 47 (2022-04-26): Strategy -0.58%, B&H -2.33% ($426.53 -> $416.60), Diff +1.75%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 48 (2022-04-27): Strategy 1.70%, B&H 0.09% ($419.77 -> $420.16), Diff +1.60%, Thresholds: Buy=1.80%, Sell=1.40%
+  Day 49 (2022-04-28): Strategy 1.05%, B&H 0.19% ($423.38 -> $424.20), Diff +0.85%, Thresholds: Buy=1.80%, Sell=2.00%
+  Day 50 (2022-04-29): Strategy -1.32%, B&H -3.32% ($426.22 -> $412.05), Diff +2.00%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 51 (2022-05-02): Strategy 1.69%, B&H -0.02% ($414.03 -> $413.95), Diff +1.71%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 52 (2022-05-03): Strategy 1.16%, B&H 0.84% ($413.48 -> $416.96), Diff +0.32%, Thresholds: Buy=-0.50%, Sell=0.70%
+  Day 53 (2022-05-04): Strategy 3.93%, B&H 2.72% ($417.52 -> $428.88), Diff +1.21%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 54 (2022-05-05): Strategy -2.91%, B&H -3.14% ($426.80 -> $413.40), Diff +0.23%, Thresholds: Buy=-0.50%, Sell=1.70%
+  Day 55 (2022-05-06): Strategy 0.98%, B&H -0.37% ($411.88 -> $410.37), Diff +1.35%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 56 (2022-05-09): Strategy 0.42%, B&H -1.79% ($406.15 -> $398.89), Diff +2.21%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 57 (2022-05-10): Strategy -0.85%, B&H -0.49% ($401.05 -> $399.09), Diff -0.37%, Thresholds: Buy=1.60%, Sell=-0.50%
+  Day 58 (2022-05-11): Strategy 0.00%, B&H -1.81% ($400.70 -> $393.45), Diff +1.81%, Thresholds: Buy=2.00%, Sell=2.00%
+  Day 59 (2022-05-12): Strategy 1.51%, B&H 0.80% ($390.76 -> $393.90), Diff +0.70%, Thresholds: Buy=1.70%, Sell=1.20%
+  Day 60 (2022-05-13): Strategy 0.98%, B&H 1.25% ($396.73 -> $401.70), Diff -0.27%, Thresholds: Buy=0.90%, Sell=2.00%
+  Day 61 (2022-05-16): Strategy 0.39%, B&H 0.18% ($399.60 -> $400.33), Diff +0.21%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 62 (2022-05-17): Strategy 0.78%, B&H 1.26% ($403.87 -> $408.97), Diff -0.48%, Thresholds: Buy=-0.50%, Sell=1.80%
+  Day 63 (2022-05-18): Strategy -3.71%, B&H -4.21% ($406.65 -> $389.51), Diff +0.51%, Thresholds: Buy=1.20%, Sell=1.70%
+  Day 64 (2022-05-19): Strategy -0.08%, B&H 0.64% ($388.16 -> $390.63), Diff -0.72%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 65 (2022-05-20): Strategy -1.12%, B&H -0.67% ($393.21 -> $390.58), Diff -0.45%, Thresholds: Buy=2.00%, Sell=0.20%
+  Day 66 (2022-05-23): Strategy 1.31%, B&H -0.08% ($393.41 -> $393.10), Diff +1.39%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 67 (2022-05-24): Strategy 0.77%, B&H 1.00% ($391.65 -> $395.57), Diff -0.23%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 68 (2022-05-25): Strategy 0.80%, B&H 0.64% ($394.15 -> $396.67), Diff +0.16%, Thresholds: Buy=-0.50%, Sell=1.90%
+  Day 69 (2022-05-26): Strategy 1.29%, B&H 1.66% ($398.88 -> $405.50), Diff -0.36%, Thresholds: Buy=-0.50%, Sell=1.40%
+  Day 70 (2022-05-27): Strategy 0.99%, B&H 2.78% ($405.43 -> $416.70), Diff -1.79%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 71 (2022-05-31): Strategy 1.07%, B&H 0.02% ($414.49 -> $414.57), Diff +1.05%, Thresholds: Buy=-0.50%, Sell=1.40%
+  Day 72 (2022-06-01): Strategy -1.17%, B&H -1.20% ($413.32 -> $408.37), Diff +0.03%, Thresholds: Buy=1.00%, Sell=1.90%
+  Day 73 (2022-06-02): Strategy 0.51%, B&H 1.71% ($411.57 -> $418.60), Diff -1.20%, Thresholds: Buy=0.90%, Sell=2.00%
+  Day 74 (2022-06-03): Strategy 0.60%, B&H -1.38% ($416.09 -> $410.36), Diff +1.98%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 75 (2022-06-06): Strategy -0.66%, B&H -0.74% ($414.82 -> $411.76), Diff +0.08%, Thresholds: Buy=1.50%, Sell=2.00%
+  Day 76 (2022-06-07): Strategy 0.45%, B&H 1.25% ($409.40 -> $414.53), Diff -0.81%, Thresholds: Buy=1.50%, Sell=-0.50%
+  Day 77 (2022-06-08): Strategy 0.00%, B&H -0.58% ($414.00 -> $411.60), Diff +0.58%, Thresholds: Buy=1.60%, Sell=1.60%
+  Day 78 (2022-06-09): Strategy -0.57%, B&H -2.21% ($411.27 -> $402.20), Diff +1.64%, Thresholds: Buy=2.00%, Sell=1.10%
+  Day 79 (2022-06-10): Strategy -1.08%, B&H -2.64% ($401.71 -> $391.10), Diff +1.57%, Thresholds: Buy=1.70%, Sell=1.70%
+  Day 80 (2022-06-13): Strategy -1.33%, B&H -1.61% ($381.54 -> $375.39), Diff +0.28%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 81 (2022-06-14): Strategy 0.91%, B&H -0.88% ($379.00 -> $375.66), Diff +1.79%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 82 (2022-06-15): Strategy 2.20%, B&H 1.61% ($375.65 -> $381.71), Diff +0.59%, Thresholds: Buy=1.20%, Sell=1.80%
+  Day 83 (2022-06-16): Strategy 0.08%, B&H -1.58% ($372.81 -> $366.91), Diff +1.66%, Thresholds: Buy=2.00%, Sell=1.90%
+  Day 84 (2022-06-17): Strategy 1.82%, B&H -0.67% ($368.63 -> $366.15), Diff +2.50%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 85 (2022-06-21): Strategy -0.23%, B&H 0.55% ($372.74 -> $374.78), Diff -0.78%, Thresholds: Buy=1.70%, Sell=2.00%
+  Day 86 (2022-06-22): Strategy 2.87%, B&H 1.17% ($367.89 -> $372.21), Diff +1.69%, Thresholds: Buy=2.00%, Sell=1.80%
+  Day 87 (2022-06-23): Strategy 0.86%, B&H 1.06% ($373.86 -> $377.84), Diff -0.20%, Thresholds: Buy=1.90%, Sell=2.00%
+  Day 88 (2022-06-24): Strategy 0.07%, B&H 2.40% ($380.89 -> $390.05), Diff -2.34%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 89 (2022-06-27): Strategy -0.15%, B&H -0.94% ($392.53 -> $388.83), Diff +0.80%, Thresholds: Buy=-0.50%, Sell=1.90%
+  Day 90 (2022-06-28): Strategy -1.47%, B&H -2.47% ($390.25 -> $380.62), Diff +0.99%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 91 (2022-06-29): Strategy 0.24%, B&H 0.24% ($380.91 -> $381.84), Diff -0.00%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 92 (2022-06-30): Strategy 0.05%, B&H 0.25% ($375.82 -> $376.75), Diff -0.20%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 93 (2022-07-01): Strategy 0.90%, B&H 1.79% ($374.09 -> $380.80), Diff -0.89%, Thresholds: Buy=1.50%, Sell=1.80%
+  Day 94 (2022-07-05): Strategy 1.92%, B&H -0.21% ($381.75 -> $380.95), Diff +2.13%, Thresholds: Buy=2.00%, Sell=1.90%
+  Day 95 (2022-07-06): Strategy 0.00%, B&H -0.09% ($380.64 -> $380.30), Diff +0.09%, Thresholds: Buy=2.00%, Sell=2.00%
+  Day 96 (2022-07-07): Strategy 0.32%, B&H 0.22% ($387.35 -> $388.19), Diff +0.10%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 97 (2022-07-08): Strategy 0.03%, B&H 0.62% ($387.79 -> $390.21), Diff -0.60%, Thresholds: Buy=1.40%, Sell=0.70%
+  Day 98 (2022-07-11): Strategy -0.08%, B&H -0.26% ($385.72 -> $384.70), Diff +0.19%, Thresholds: Buy=1.40%, Sell=0.30%
+  Day 99 (2022-07-12): Strategy 0.00%, B&H -0.19% ($381.40 -> $380.66), Diff +0.19%, Thresholds: Buy=1.70%, Sell=-0.50%
+  Day 100 (2022-07-13): Strategy -0.48%, B&H -1.28% ($381.19 -> $376.30), Diff +0.80%, Thresholds: Buy=1.00%, Sell=-0.50%
+  Day 101 (2022-07-14): Strategy 0.12%, B&H 0.94% ($375.82 -> $379.35), Diff -0.82%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 102 (2022-07-15): Strategy 1.78%, B&H 1.71% ($378.79 -> $385.27), Diff +0.07%, Thresholds: Buy=-0.50%, Sell=1.60%
+  Day 103 (2022-07-18): Strategy -1.46%, B&H -1.36% ($388.30 -> $383.01), Diff -0.10%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 104 (2022-07-19): Strategy 0.00%, B&H 2.68% ($383.05 -> $393.32), Diff -2.68%, Thresholds: Buy=0.20%, Sell=1.90%
+  Day 105 (2022-07-20): Strategy 0.40%, B&H 0.04% ($393.36 -> $393.53), Diff +0.35%, Thresholds: Buy=-0.50%, Sell=1.80%
+  Day 106 (2022-07-21): Strategy 0.95%, B&H 1.00% ($394.79 -> $398.73), Diff -0.05%, Thresholds: Buy=-0.50%, Sell=1.60%
+  Day 107 (2022-07-22): Strategy 0.00%, B&H -0.98% ($396.80 -> $392.93), Diff +0.98%, Thresholds: Buy=1.00%, Sell=1.50%
+  Day 108 (2022-07-25): Strategy -0.10%, B&H -0.20% ($396.89 -> $396.11), Diff +0.10%, Thresholds: Buy=0.90%, Sell=-0.50%
+  Day 109 (2022-07-26): Strategy -0.25%, B&H -0.42% ($394.80 -> $393.13), Diff +0.18%, Thresholds: Buy=1.70%, Sell=1.80%
+  Day 110 (2022-07-27): Strategy 0.73%, B&H 2.17% ($394.09 -> $402.66), Diff -1.45%, Thresholds: Buy=-0.50%, Sell=1.20%
+  Day 111 (2022-07-28): Strategy 2.54%, B&H 2.54% ($399.19 -> $409.31), Diff +0.00%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 112 (2022-07-29): Strategy 0.60%, B&H 1.09% ($407.76 -> $412.22), Diff -0.49%, Thresholds: Buy=-0.50%, Sell=1.60%
+  Day 113 (2022-08-01): Strategy 0.09%, B&H -0.01% ($410.86 -> $410.80), Diff +0.10%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 114 (2022-08-02): Strategy 0.90%, B&H -0.13% ($408.71 -> $408.16), Diff +1.03%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 115 (2022-08-03): Strategy 0.00%, B&H 1.19% ($408.83 -> $413.70), Diff -1.19%, Thresholds: Buy=0.80%, Sell=1.30%
+  Day 116 (2022-08-04): Strategy 0.05%, B&H -0.07% ($414.08 -> $413.81), Diff +0.12%, Thresholds: Buy=-0.50%, Sell=1.30%
+  Day 117 (2022-08-05): Strategy 0.44%, B&H -0.47% ($414.69 -> $412.76), Diff +0.91%, Thresholds: Buy=1.40%, Sell=1.60%
+  Day 118 (2022-08-08): Strategy 0.00%, B&H -0.53% ($415.57 -> $413.35), Diff +0.53%, Thresholds: Buy=1.10%, Sell=1.20%
+  Day 119 (2022-08-09): Strategy 0.00%, B&H -0.40% ($413.19 -> $411.53), Diff +0.40%, Thresholds: Buy=1.60%, Sell=1.30%
+  Day 120 (2022-08-10): Strategy 0.19%, B&H 2.04% ($411.68 -> $420.08), Diff -1.85%, Thresholds: Buy=1.50%, Sell=1.40%
+  Day 121 (2022-08-11): Strategy 0.00%, B&H -0.14% ($420.80 -> $420.21), Diff +0.14%, Thresholds: Buy=1.70%, Sell=2.00%
+  Day 122 (2022-08-12): Strategy 0.00%, B&H 1.18% ($422.22 -> $427.19), Diff -1.18%, Thresholds: Buy=0.30%, Sell=1.20%
+  Day 123 (2022-08-15): Strategy 0.79%, B&H 0.79% ($425.14 -> $428.49), Diff +0.00%, Thresholds: Buy=-0.50%, Sell=1.40%
+  Day 124 (2022-08-16): Strategy 0.48%, B&H 0.26% ($428.82 -> $429.95), Diff +0.21%, Thresholds: Buy=1.50%, Sell=0.90%
+  Day 125 (2022-08-17): Strategy 0.42%, B&H -0.63% ($428.61 -> $425.90), Diff +1.05%, Thresholds: Buy=1.70%, Sell=0.60%
+  Day 126 (2022-08-18): Strategy 0.00%, B&H 0.48% ($425.78 -> $427.83), Diff -0.48%, Thresholds: Buy=2.00%, Sell=0.90%
+  Day 127 (2022-08-19): Strategy -0.66%, B&H -1.04% ($425.70 -> $421.28), Diff +0.38%, Thresholds: Buy=1.40%, Sell=0.90%
+  Day 128 (2022-08-22): Strategy 0.00%, B&H -1.10% ($417.50 -> $412.90), Diff +1.10%, Thresholds: Buy=1.70%, Sell=0.20%
+  Day 129 (2022-08-23): Strategy 0.48%, B&H -0.54% ($414.33 -> $412.10), Diff +1.02%, Thresholds: Buy=1.50%, Sell=-0.50%
+  Day 130 (2022-08-24): Strategy 0.51%, B&H 0.70% ($411.48 -> $414.38), Diff -0.20%, Thresholds: Buy=1.90%, Sell=1.30%
+  Day 131 (2022-08-25): Strategy 0.84%, B&H 0.36% ($417.52 -> $419.03), Diff +0.48%, Thresholds: Buy=0.30%, Sell=1.20%
+  Day 132 (2022-08-26): Strategy -3.08%, B&H -3.45% ($418.14 -> $403.71), Diff +0.37%, Thresholds: Buy=0.30%, Sell=0.70%
+  Day 133 (2022-08-29): Strategy 0.77%, B&H 0.11% ($402.19 -> $402.63), Diff +0.66%, Thresholds: Buy=2.00%, Sell=0.30%
+  Day 134 (2022-08-30): Strategy -1.58%, B&H -2.28% ($406.69 -> $397.40), Diff +0.71%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 135 (2022-08-31): Strategy -0.27%, B&H -1.63% ($399.25 -> $392.76), Diff +1.35%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 136 (2022-09-01): Strategy 0.32%, B&H 0.98% ($392.77 -> $396.60), Diff -0.65%, Thresholds: Buy=1.60%, Sell=-0.50%
+  Day 137 (2022-09-02): Strategy 0.55%, B&H -0.94% ($396.25 -> $392.52), Diff +1.49%, Thresholds: Buy=2.00%, Sell=1.70%
+  Day 138 (2022-09-06): Strategy 0.11%, B&H -1.09% ($395.09 -> $390.79), Diff +1.20%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 139 (2022-09-07): Strategy 1.39%, B&H 1.52% ($391.50 -> $397.46), Diff -0.13%, Thresholds: Buy=1.00%, Sell=1.90%
+  Day 140 (2022-09-08): Strategy 0.00%, B&H 1.04% ($396.91 -> $401.02), Diff -1.04%, Thresholds: Buy=1.90%, Sell=2.00%
+  Day 141 (2022-09-09): Strategy 1.04%, B&H 1.21% ($402.55 -> $407.44), Diff -0.18%, Thresholds: Buy=-0.50%, Sell=1.70%
+  Day 142 (2022-09-12): Strategy 0.90%, B&H 0.77% ($408.12 -> $411.25), Diff +0.13%, Thresholds: Buy=-0.50%, Sell=1.60%
+  Day 143 (2022-09-13): Strategy 0.00%, B&H -4.71% ($412.82 -> $393.36), Diff +4.71%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 144 (2022-09-14): Strategy 1.01%, B&H 0.02% ($395.04 -> $395.10), Diff +1.00%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 145 (2022-09-15): Strategy 0.29%, B&H -1.84% ($394.90 -> $387.64), Diff +2.12%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 146 (2022-09-16): Strategy 0.32%, B&H 0.48% ($385.27 -> $387.12), Diff -0.16%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 147 (2022-09-19): Strategy 0.24%, B&H 1.74% ($383.09 -> $389.77), Diff -1.51%, Thresholds: Buy=-0.50%, Sell=-0.10%
+  Day 148 (2022-09-20): Strategy -1.04%, B&H -1.67% ($387.90 -> $381.41), Diff +0.63%, Thresholds: Buy=1.60%, Sell=1.40%
+  Day 149 (2022-09-21): Strategy 0.00%, B&H -2.93% ($386.52 -> $375.20), Diff +2.93%, Thresholds: Buy=1.90%, Sell=1.80%
+  Day 150 (2022-09-22): Strategy 0.95%, B&H -0.34% ($378.57 -> $377.29), Diff +1.29%, Thresholds: Buy=2.00%, Sell=1.30%
+  Day 151 (2022-09-23): Strategy -0.10%, B&H -1.37% ($373.06 -> $367.95), Diff +1.27%, Thresholds: Buy=2.00%, Sell=1.40%
+  Day 152 (2022-09-26): Strategy 0.00%, B&H -0.56% ($367.15 -> $365.10), Diff +0.56%, Thresholds: Buy=1.80%, Sell=-0.50%
+  Day 153 (2022-09-27): Strategy 0.55%, B&H -1.33% ($369.21 -> $364.29), Diff +1.89%, Thresholds: Buy=1.40%, Sell=1.50%
+  Day 154 (2022-09-28): Strategy -0.10%, B&H 2.36% ($361.15 -> $369.68), Diff -2.46%, Thresholds: Buy=1.60%, Sell=2.00%
+  Day 155 (2022-09-29): Strategy 0.56%, B&H -0.56% ($366.35 -> $364.30), Diff +1.12%, Thresholds: Buy=1.30%, Sell=1.90%
+  Day 156 (2022-09-30): Strategy -0.45%, B&H -2.23% ($366.02 -> $357.87), Diff +1.77%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 157 (2022-10-03): Strategy 1.88%, B&H 3.00% ($356.74 -> $367.45), Diff -1.12%, Thresholds: Buy=1.70%, Sell=2.00%
+  Day 158 (2022-10-04): Strategy 1.45%, B&H 1.36% ($371.95 -> $377.01), Diff +0.09%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 159 (2022-10-05): Strategy 0.49%, B&H 0.84% ($375.31 -> $378.46), Diff -0.35%, Thresholds: Buy=0.70%, Sell=-0.50%
+  Day 160 (2022-10-06): Strategy 0.36%, B&H -0.96% ($375.80 -> $372.19), Diff +1.32%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 161 (2022-10-07): Strategy -0.20%, B&H -2.73% ($372.18 -> $362.02), Diff +2.53%, Thresholds: Buy=1.70%, Sell=0.80%
+  Day 162 (2022-10-10): Strategy 0.27%, B&H 0.27% ($361.19 -> $362.18), Diff -0.00%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 163 (2022-10-11): Strategy -1.82%, B&H 0.03% ($358.00 -> $358.09), Diff -1.85%, Thresholds: Buy=1.90%, Sell=-0.50%
+  Day 164 (2022-10-12): Strategy -0.19%, B&H -0.75% ($359.58 -> $356.90), Diff +0.56%, Thresholds: Buy=1.70%, Sell=2.00%
+  Day 165 (2022-10-13): Strategy 1.33%, B&H 1.97% ($358.65 -> $365.71), Diff -0.64%, Thresholds: Buy=1.80%, Sell=1.00%
+  Day 166 (2022-10-14): Strategy -1.60%, B&H -2.30% ($365.00 -> $356.60), Diff +0.71%, Thresholds: Buy=0.70%, Sell=0.90%
+  Day 167 (2022-10-17): Strategy 0.00%, B&H 2.30% ($361.51 -> $369.83), Diff -2.30%, Thresholds: Buy=2.00%, Sell=1.70%
+  Day 168 (2022-10-18): Strategy -0.05%, B&H 0.55% ($372.83 -> $374.88), Diff -0.60%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 169 (2022-10-19): Strategy 0.00%, B&H -1.22% ($371.70 -> $367.15), Diff +1.22%, Thresholds: Buy=1.50%, Sell=1.50%
+  Day 170 (2022-10-20): Strategy 0.65%, B&H -0.70% ($366.70 -> $364.13), Diff +1.35%, Thresholds: Buy=1.20%, Sell=-0.50%
+  Day 171 (2022-10-21): Strategy 1.04%, B&H 3.16% ($363.94 -> $375.45), Diff -2.12%, Thresholds: Buy=1.10%, Sell=1.80%
+  Day 172 (2022-10-24): Strategy 0.00%, B&H 1.60% ($373.28 -> $379.25), Diff -1.60%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 173 (2022-10-25): Strategy 0.21%, B&H 0.69% ($378.11 -> $380.72), Diff -0.48%, Thresholds: Buy=-0.50%, Sell=-0.50%
+  Day 174 (2022-10-26): Strategy -0.17%, B&H 0.26% ($382.86 -> $383.87), Diff -0.43%, Thresholds: Buy=-0.50%, Sell=2.00%
+  Day 175 (2022-10-27): Strategy 0.67%, B&H -1.55% ($383.09 -> $377.14), Diff +2.22%, Thresholds: Buy=1.70%, Sell=1.60%
+  Day 176 (2022-10-28): Strategy 0.00%, B&H 2.88% ($379.26 -> $390.20), Diff -2.88%, Thresholds: Buy=1.40%, Sell=1.90%
+  Day 177 (2022-10-31): Strategy -0.03%, B&H -0.01% ($387.61 -> $387.58), Diff -0.03%, Thresholds: Buy=0.40%, Sell=-0.50%
+  Day 178 (2022-11-01): Strategy 0.31%, B&H -1.12% ($389.16 -> $384.81), Diff +1.42%, Thresholds: Buy=-0.50%, Sell=1.20%
+  Day 179 (2022-11-02): Strategy 0.91%, B&H -0.25% ($385.31 -> $384.35), Diff +1.16%, Thresholds: Buy=0.90%, Sell=2.00%
+  Day 180 (2022-11-03): Strategy 0.00%, B&H -1.26% ($374.93 -> $370.20), Diff +1.26%, Thresholds: Buy=1.70%, Sell=-0.50%
+  Day 181 (2022-11-04): Strategy 2.40%, B&H 0.70% ($373.84 -> $376.45), Diff +1.70%, Thresholds: Buy=1.00%, Sell=1.90%
+  Day 182 (2022-11-07): Strategy 0.78%, B&H 0.90% ($377.70 -> $381.09), Diff -0.12%, Thresholds: Buy=0.60%, Sell=2.00%
+  Day 183 (2022-11-08): Strategy 0.61%, B&H 0.19% ($380.94 -> $381.65), Diff +0.43%, Thresholds: Buy=2.00%, Sell=1.80%
+  Day 184 (2022-11-09): Strategy -0.02%, B&H -1.74% ($381.43 -> $374.81), Diff +1.72%, Thresholds: Buy=2.00%, Sell=-0.50%
+  Day 185 (2022-11-10): Strategy 5.16%, B&H 5.58% ($375.00 -> $395.94), Diff -0.42%, Thresholds: Buy=-0.50%, Sell=1.90%
+  Day 186 (2022-11-11): Strategy 1.31%, B&H 1.20% ($394.21 -> $398.93), Diff +0.11%, Thresholds: Buy=0.70%, Sell=2.00%
+  Day 187 (2022-11-14): Strategy -0.47%, B&H -0.51% ($397.20 -> $395.18), Diff +0.04%, Thresholds: Buy=1.00%, Sell=1.00%
+  Day 188 (2022-11-15): Strategy 0.35%, B&H -0.25% ($397.65 -> $396.65), Diff +0.60%, Thresholds: Buy=1.50%, Sell=2.00%
+  Day 189 (2022-11-16): Strategy -0.19%, B&H -0.73% ($399.33 -> $396.40), Diff +0.55%, Thresholds: Buy=1.80%, Sell=0.60%
+  Day 190 (2022-11-17): Strategy 1.01%, B&H -0.17% ($395.34 -> $394.66), Diff +1.18%, Thresholds: Buy=1.70%, Sell=1.10%
+  Day 191 (2022-11-18): Strategy 0.00%, B&H 0.08% ($394.94 -> $395.24), Diff -0.08%, Thresholds: Buy=1.20%, Sell=1.70%
+  Day 192 (2022-11-21): Strategy 0.18%, B&H 0.18% ($394.05 -> $394.75), Diff +0.00%, Thresholds: Buy=0.70%, Sell=1.50%
+  Day 193 (2022-11-22): Strategy 1.45%, B&H 1.45% ($394.39 -> $400.09), Diff -0.00%, Thresholds: Buy=-0.50%, Sell=1.70%
+  Day 194 (2022-11-23): Strategy 0.78%, B&H 0.65% ($400.40 -> $403.01), Diff +0.13%, Thresholds: Buy=1.10%, Sell=1.90%
+  Day 195 (2022-11-25): Strategy 0.03%, B&H -0.16% ($402.90 -> $402.26), Diff +0.19%, Thresholds: Buy=1.20%, Sell=1.60%
+  Day 196 (2022-11-28): Strategy 0.33%, B&H -0.85% ($399.93 -> $396.54), Diff +1.18%, Thresholds: Buy=1.30%, Sell=0.70%
+  Day 197 (2022-11-29): Strategy 0.00%, B&H -0.59% ($397.86 -> $395.52), Diff +0.59%, Thresholds: Buy=1.60%, Sell=1.10%
+  Day 198 (2022-11-30): Strategy 0.00%, B&H 2.99% ($396.40 -> $408.26), Diff -2.99%, Thresholds: Buy=1.40%, Sell=1.40%
+  Day 199 (2022-12-01): Strategy 0.00%, B&H -0.26% ($407.27 -> $406.23), Diff +0.26%, Thresholds: Buy=2.00%, Sell=1.70%
+  Day 200 (2022-12-02): Strategy 0.00%, B&H -0.37% ($407.44 -> $405.93), Diff +0.37%, Thresholds: Buy=1.50%, Sell=1.50%
+
+ANALYSIS:
+The daily rolling window strategy OUTPERFORMED Buy & Hold over the 200-day period by +102.39%.

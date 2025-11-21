@@ -1,0 +1,69 @@
+Time-Split Buy/Sell Models - Summary Report
+================================================================================
+
+DATA SPLIT STRATEGY:
+  First 70.0% of chronological data used for training
+  Next 15.0% of chronological data used for validation
+  Last 15.0% of chronological data used for testing
+
+DATA SPLIT:
+  Training set:
+    Total valid signals:   1795 samples
+    Buy signals:     842 samples ( 46.9%)
+    Sell signals:    953 samples ( 53.1%)
+  Validation set:
+    Total valid signals:    385 samples
+    Buy signals:     140 samples ( 36.4%)
+    Sell signals:    245 samples ( 63.6%)
+  Testing set:
+    Total valid signals:    382 samples
+    Buy signals:     208 samples ( 54.5%)
+    Sell signals:    174 samples ( 45.5%)
+
+BUY MODEL PERFORMANCE:
+  Validation:
+    RMSE: 1.2098%
+    MAE:  1.0234%
+    R²:   -0.0094
+    Acc:  97.86%
+  Testing:
+    RMSE: 0.9874%
+    MAE:  0.7884%
+    R²:   0.1547
+    Acc:  69.71%
+
+SELL MODEL PERFORMANCE:
+  Validation:
+    RMSE: 1.1802%
+    MAE:  0.9890%
+    R²:   -0.7355
+    Acc:  89.80%
+  Testing:
+    RMSE: 1.2458%
+    MAE:  1.0829%
+    R²:   -2.8698
+    Acc:  87.36%
+
+TOP 10 BUY MODEL FEATURES:
+   9. feat_break_bi_amp_rate                  : 0.1692
+  33. feat_bsp_bi_amp                         : 0.0648
+   8. feat_break_bi_amp                       : 0.0605
+  31. feat_bsp3_bi_klu_cnt                    : 0.0597
+  32. feat_bsp3_zs_height                     : 0.0510
+  17. feat_bsp2_break_bi_amp                  : 0.0479
+  18. feat_bsp2_break_bi_amp_rate             : 0.0462
+  56. klu_open                                : 0.0435
+  54. klu_high                                : 0.0416
+  55. klu_low                                 : 0.0333
+
+TOP 10 SELL MODEL FEATURES:
+  60. macd_dif                                : 0.0721
+  56. klu_open                                : 0.0510
+  25. feat_bsp2s_break_bi_amp_rate            : 0.0377
+  38. feat_level                              : 0.0337
+  14. feat_bsp2_bi_amp                        : 0.0327
+  17. feat_bsp2_break_bi_amp                  : 0.0327
+  21. feat_bsp2s_bi_amp                       : 0.0312
+  54. klu_high                                : 0.0311
+  29. feat_bsp3_bi_amp                        : 0.0305
+  33. feat_bsp_bi_amp                         : 0.0284

@@ -1,0 +1,30 @@
+Window 14/17 Summary Report
+Period: 2024-12-06 to 2024-12-19
+Data Range: 65.0% - 85.0%
+================================================================================
+
+WINDOW STATISTICS:
+  Data points: 287
+  Trading signals: 323
+  - Buy signals: 176
+  - Sell signals: 147
+
+ML TRADING STRATEGY (Hybrid-Split Models):
+  Final Value: $9,960.85
+  Total Return: -0.39%
+  Max Drawdown: 2.05%
+  Total Trades: 1
+  Completed Trades: 1
+  Win Rate: 0.0%
+  Skipped Buy Signals: 162
+  Skipped Sell Signals: 10
+
+BUY & HOLD STRATEGY:
+  Entry Price: $607.61
+  Final Price: $584.62
+  Final Value: $9,621.65
+  Total Return: -3.78%
+
+COMPARISON:
+  ML vs B&H: +3.39%
+  Outperformance: +3.53%

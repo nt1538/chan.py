@@ -1,0 +1,65 @@
+OPTIMAL THRESHOLD ANALYSIS FOR 1.0% PROFIT TARGET
+================================================================================
+
+BUY MODEL:
+----------------------------------------
+Validation Set:
+  OPTIMAL: Meets 50% success rate criteria
+  Optimal threshold: 1.30%
+  Trades selected: 100.0 (42.0% of all trades)
+  Trades meeting 1.0% target: 91.0 (91.0% success rate)
+  Average profit: 2.34%
+
+Testing Set:
+  OPTIMAL: Meets 50% success rate criteria
+  Optimal threshold: 1.90%
+  Trades selected: 41.0 (8.2% of all trades)
+  Trades meeting 1.0% target: 37.0 (90.2% success rate)
+  Average profit: 2.24%
+
+SELL MODEL:
+----------------------------------------
+Validation Set:
+  OPTIMAL: Meets 50% success rate criteria
+  Optimal threshold: 1.10%
+  Trades selected: 170.0 (61.8% of all trades)
+  Trades meeting 1.0% target: 154.0 (90.6% success rate)
+  Average profit: 2.14%
+
+Testing Set:
+  OPTIMAL: Meets 50% success rate criteria
+  Optimal threshold: 3.30%
+  Trades selected: 2.0 (0.5% of all trades)
+  Trades meeting 1.0% target: 2.0 (100.0% success rate)
+  Average profit: 1.32%
+
+IMPLEMENTATION GUIDE:
+----------------------------------------
+To ensure the majority of your selected trades achieve at least 1.0% profit:
+
+1. For BUY signals:
+   - Use a minimum prediction threshold of 1.90%
+   - Only take trades where the model predicts a profit of at least 1.90%
+   - This will select approximately 8.2% of all buy signals
+   - Expected success rate: 90.2% of selected trades will achieve 1.0% or more profit
+   - Expected average profit: 2.24%
+
+2. For SELL signals:
+   - Use a minimum prediction threshold of 3.30%
+   - Only take trades where the model predicts a profit of at least 3.30%
+   - This will select approximately 0.5% of all sell signals
+   - Expected success rate: 100.0% of selected trades will achieve 1.0% or more profit
+   - Expected average profit: 1.32%
+
+ADJUSTMENT GUIDELINES:
+----------------------------------------
+To adjust the target profit percentage:
+
+1. Modify the TARGET_PROFIT_PCT parameter in this script
+2. Re-run the analysis to find new optimal thresholds
+3. Consider the trade-off between:
+   - Higher success rate (more trades meeting the target)
+   - More trading opportunities (more trades selected)
+
+Note: If you want to be more conservative, use a higher threshold than the optimal value.
+This will increase the success rate but reduce the number of trading opportunities.

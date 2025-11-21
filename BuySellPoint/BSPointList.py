@@ -11,8 +11,8 @@ from ZS.ZS import CZS
 from .BS_Point import CBS_Point
 from .BSPointConfig import CBSPointConfig, CPointConfig
 
-LINE_TYPE = TypeVar('LINE_TYPE', CBi, CSeg[CBi])
-LINE_LIST_TYPE = TypeVar('LINE_LIST_TYPE', CBiList, CSegListComm[CBi])
+LINE_TYPE = TypeVar('LINE_TYPE', CBi, CSeg)
+LINE_LIST_TYPE = TypeVar('LINE_LIST_TYPE', CBiList, CSegListComm)
 
 
 class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
@@ -34,6 +34,8 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             assert self.bsp_store_dict[bsp_type][bsp.is_buy][-1].bi.idx < bsp.bi.idx, f"{bsp_type}, {bsp.is_buy} {self.bsp_store_dict[bsp_type][bsp.is_buy][-1].bi.idx} {bsp.bi.idx}"
         self.bsp_store_dict[bsp_type][bsp.is_buy].append(bsp)
         self.bsp_store_flat_dict[bsp.bi.idx] = bsp
+        # Standardize features for this BSP
+        self.standardize_features_for_bsp(bsp)
 
     def add_bsp1(self, bsp: CBS_Point[LINE_TYPE]):
         if len(self.bsp1_list) > 0:
@@ -49,7 +51,6 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                         break
                     del self.bsp_store_flat_dict[bsp_list[is_buy][-1].bi.idx]
                     bsp_list[is_buy].pop()
-                    
 
     def clear_bsp1_end(self):
         while len(self.bsp1_list) > 0:
@@ -72,7 +73,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         self.cal_seg_bs1point(seg_list, bi_list)
         self.cal_seg_bs2point(seg_list, bi_list)
         self.cal_seg_bs3point(seg_list, bi_list)
-
+        self.standardize_all_features()  # Standardize features for all BSPoints
         self.update_last_pos(seg_list)
 
     def update_last_pos(self, seg_list: CSegListComm):
@@ -104,6 +105,8 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             exist_bsp.add_another_bsp_prop(bs_type, relate_bsp1)
             if feature_dict is not None:
                 exist_bsp.add_feat(feature_dict)
+                # Standardize features again when adding new features
+                self.standardize_features_for_bsp(exist_bsp)
             return
         if bs_type not in self.config.GetBSConfig(is_buy).target_types:
             is_target_bsp = False
@@ -116,12 +119,148 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 relate_bsp1=relate_bsp1,
                 feature_dict=feature_dict,
             )
+            # Standardize features for new BSP
+            self.standardize_features_for_bsp(bsp)
         else:
             return
         if is_target_bsp:
             self.store_add_bsp(bs_type, bsp)
         if bs_type in [BSP_TYPE.T1, BSP_TYPE.T1P]:
             self.add_bsp1(bsp)
+
+    def standardize_all_features(self):
+        """Standardize features for all BSPoints in the list"""
+        for bsp in self.bsp_iter():
+            self.standardize_features_for_bsp(bsp)
+
+    # New method to standardize features for a single BSPoint
+    def standardize_features_for_bsp(self, bsp: CBS_Point):
+        """
+        Standardize features for a single BSPoint to ensure all types have the same feature set
+        """
+        if not hasattr(bsp, 'features') or not bsp.features:
+            return
+            
+        feature_dict = bsp.features.to_dict() if bsp.features else {}
+        if not feature_dict:
+            return
+            
+        bs_type_str = bsp.type[0].value if bsp.type else ''
+        
+        # 1. Standardize divergence_rate
+        if 'divergence_rate' in feature_dict:
+            # For BSP1, keep existing divergence_rate
+            bsp.add_feat({'divergence_rate': feature_dict['divergence_rate']})
+        elif bs_type_str in ['2', '2s'] and f'bsp{bs_type_str}_retrace_rate' in feature_dict:
+            # For BSP2/2S, use retrace_rate as divergence_rate
+            bsp.add_feat({'divergence_rate': feature_dict[f'bsp{bs_type_str}_retrace_rate']})
+        elif bs_type_str in ['3', '3a', '3b'] and 'bsp3_zs_height' in feature_dict:
+            # For BSP3, use zs_height as divergence_rate
+            bsp.add_feat({'divergence_rate': feature_dict['bsp3_zs_height']})
+        
+        # 2. Standardize ZS count
+        if 'zs_cnt' in feature_dict:
+            bsp.add_feat({'zs_cnt': feature_dict['zs_cnt']})
+        else:
+            # Add default values for types without zs_cnt
+            if bs_type_str in ['2', '2s']:
+                bsp.add_feat({'zs_cnt': 1.0})
+            elif bs_type_str in ['3', '3a', '3b']:
+                bsp.add_feat({'zs_cnt': 2.0})
+            else:
+                bsp.add_feat({'zs_cnt': 0.0})
+        
+        # 3. Standardize break_bi features
+        # These features describe the breakout pattern and are crucial for BSP2/2S
+        # but need to be derived for BSP1 and BSP3
+        
+        if bs_type_str == '2' and 'bsp2_break_bi_amp' in feature_dict:
+            # For BSP2, use existing break_bi features
+            bsp.add_feat({
+                'break_bi_amp': feature_dict['bsp2_break_bi_amp'],
+                'break_bi_klu_cnt': feature_dict.get('bsp2_break_bi_bi_klu_cnt', 0),
+                'break_bi_amp_rate': feature_dict.get('bsp2_break_bi_amp_rate', 0)
+            })
+        elif bs_type_str == '2s' and 'bsp2s_break_bi_amp' in feature_dict:
+            # For BSP2S, use existing break_bi features
+            bsp.add_feat({
+                'break_bi_amp': feature_dict['bsp2s_break_bi_amp'],
+                'break_bi_klu_cnt': feature_dict.get('bsp2s_break_bi_klu_cnt', 0),
+                'break_bi_amp_rate': feature_dict.get('bsp2s_break_bi_amp_rate', 0)
+            })
+        else:
+            # For BSP1 and BSP3, derive break_bi features
+            # This is a placeholder implementation - in a real system, 
+            # you would calculate these based on actual bi data
+            if bs_type_str in ['1', '1p'] and 'bsp1_bi_amp' in feature_dict:
+                bsp.add_feat({
+                    'break_bi_amp': feature_dict['bsp1_bi_amp'],
+                    'break_bi_klu_cnt': feature_dict.get('bsp1_bi_klu_cnt', 0),
+                    'break_bi_amp_rate': feature_dict.get('bsp1_bi_amp_rate', 0)
+                })
+            elif bs_type_str in ['3', '3a', '3b'] and 'bsp3_bi_amp' in feature_dict:
+                bsp.add_feat({
+                    'break_bi_amp': feature_dict['bsp3_bi_amp'],
+                    'break_bi_klu_cnt': feature_dict.get('bsp3_bi_klu_cnt', 0),
+                    'break_bi_amp_rate': feature_dict.get('bsp3_bi_amp_rate', 0)
+                })
+        
+        # 4. Standardize bi features (remove type prefix)
+        if bs_type_str == '1' and 'bsp1_bi_amp' in feature_dict:
+            bsp.add_feat({
+                'bi_amp': feature_dict['bsp1_bi_amp'],
+                'bi_klu_cnt': feature_dict.get('bsp1_bi_klu_cnt', 0),
+                'bi_amp_rate': feature_dict.get('bsp1_bi_amp_rate', 0)
+            })
+        elif bs_type_str == '2' and 'bsp2_bi_amp' in feature_dict:
+            bsp.add_feat({
+                'bi_amp': feature_dict['bsp2_bi_amp'],
+                'bi_klu_cnt': feature_dict.get('bsp2_bi_klu_cnt', 0),
+                'bi_amp_rate': feature_dict.get('bsp2_bi_amp_rate', 0)
+            })
+        elif bs_type_str == '2s' and 'bsp2s_bi_amp' in feature_dict:
+            bsp.add_feat({
+                'bi_amp': feature_dict['bsp2s_bi_amp'],
+                'bi_klu_cnt': feature_dict.get('bsp2s_bi_klu_cnt', 0),
+                'bi_amp_rate': feature_dict.get('bsp2s_bi_amp_rate', 0)
+            })
+        elif bs_type_str in ['3', '3a', '3b'] and 'bsp3_bi_amp' in feature_dict:
+            bsp.add_feat({
+                'bi_amp': feature_dict['bsp3_bi_amp'],
+                'bi_klu_cnt': feature_dict.get('bsp3_bi_klu_cnt', 0),
+                'bi_amp_rate': feature_dict.get('bsp3_bi_amp_rate', 0)
+            })
+        elif 'bsp_bi_amp' in feature_dict:
+            # Use the common bi_amp if type-specific ones are not available
+            bsp.add_feat({
+                'bi_amp': feature_dict['bsp_bi_amp'],
+                'bi_klu_cnt': 0,  # Default value as we don't have klu_cnt
+                'bi_amp_rate': 0  # Default value as we don't have amp_rate
+            })
+        
+        # 5. Add level feature
+        if bs_type_str == '1' or bs_type_str == '1p':
+            bsp.add_feat({'level': 1.0})
+        elif bs_type_str == '2':
+            bsp.add_feat({'level': 2.0})
+        elif bs_type_str == '2s' and 'bsp2s_lv' in feature_dict:
+            bsp.add_feat({'level': feature_dict['bsp2s_lv']})
+        elif bs_type_str == '2s':
+            bsp.add_feat({'level': 2.0})  # Default level for BSP2S
+        elif bs_type_str in ['3', '3a', '3b']:
+            bsp.add_feat({'level': 3.0})
+            
+        # Add BSP type as a feature
+        if bs_type_str == '1' or bs_type_str == '1p':
+            bsp.add_feat({'bsp_type': 1.0})
+        elif bs_type_str == '2':
+            bsp.add_feat({'bsp_type': 2.0})
+        elif bs_type_str == '2s':
+            bsp.add_feat({'bsp_type': 2.5})  # 2.5 to differentiate from BSP2
+        elif bs_type_str in ['3', '3a']:
+            bsp.add_feat({'bsp_type': 3.0})
+        elif bs_type_str == '3b':
+            bsp.add_feat({'bsp_type': 3.5})  # 3.5 to differentiate from BSP3A
 
     def cal_seg_bs1point(self, seg_list: CSegListComm[LINE_TYPE], bi_list: LINE_LIST_TYPE):
         for seg in seg_list[self.last_sure_seg_idx:]:
@@ -180,7 +319,6 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             'kdj_j': j_value,
             'volume': getattr(kl_data, 'volume', None),
             'next_bi_return': self.safe_get_next_bi_return(bi_list, last_bi.idx),
-
         }
         self.add_bs(bs_type=BSP_TYPE.T1, bi=seg.end_bi, relate_bsp1=None, is_target_bsp=is_target_bsp, feature_dict=feature_dict)
 
@@ -191,9 +329,9 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             return
         if last_bi.dir != seg.dir:
             return
-        if last_bi.is_down() and last_bi._low() > pre_bi._low():  # 创新低
+        if last_bi.is_down() and last_bi._low() > pre_bi._low():  # åˆ›æ–°ä½Ž
             return
-        if last_bi.is_up() and last_bi._high() < pre_bi._high():  # 创新高
+        if last_bi.is_up() and last_bi._high() < pre_bi._high():  # åˆ›æ–°é«˜
             return
         in_metric = pre_bi.cal_macd_metric(BSP_CONF.macd_algo, is_reverse=False)
         out_metric = last_bi.cal_macd_metric(BSP_CONF.macd_algo, is_reverse=True)
@@ -347,7 +485,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
     ):
         bias = 2
         _low, _high = None, None
-        while bsp2_bi.idx + bias < len(bi_list):  # 计算类二
+        while bsp2_bi.idx + bias < len(bi_list):  # è®¡ç®—ç±»äºŒ
             bsp2s_bi = bi_list[bsp2_bi.idx + bias]
             assert bsp2s_bi.seg_idx is not None and bsp2_bi.seg_idx is not None
             if BSP_CONF.max_bsp2s_lv is not None and bias/2 > BSP_CONF.max_bsp2s_lv:
@@ -417,7 +555,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
                 BSP_CONF = self.config.GetBSConfig(seg.is_down())
                 real_bsp1 = self.bsp1_dict.get(bsp1_bi.idx)
                 next_seg_idx = seg.idx+1
-                next_seg = seg.next  # 可能为None, 所以并不一定可以保证next_seg_idx == next_seg.idx
+                next_seg = seg.next  # å¯èƒ½ä¸ºNone, æ‰€ä»¥å¹¶ä¸ä¸€å®šå¯ä»¥ä¿è¯next_seg_idx == next_seg.idx
             else:
                 next_seg = seg
                 next_seg_idx = seg.idx
@@ -470,12 +608,13 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         macd_dea = getattr(macd_item, 'DEA', None)
         macd_fast = getattr(macd_item, 'fast_ema', None)
         macd_slow = getattr(macd_item, 'slow_ema', None)
-        ppo = (macd_fast - macd_slow) / macd_slow
 
         kdj_item = getattr(kl_data, 'kdj', None)
         k_value = getattr(kdj_item, 'k', None)
         d_value = getattr(kdj_item, 'd', None)
         j_value = getattr(kdj_item, 'j', None)
+
+        ppo = (macd_fast - macd_slow) / macd_slow
         feature_dict = {
             'bsp3_zs_height': (first_zs.high - first_zs.low) / first_zs.low,
             'bsp3_bi_amp': bsp3_bi.amp(),
@@ -494,7 +633,6 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         }
         self.add_bs(bs_type=BSP_TYPE.T3A, bi=bsp3_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
 
-
     def treat_bsp3_before(
         self,
         seg_list: CSegListComm[LINE_TYPE],
@@ -506,57 +644,83 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         real_bsp1,
         next_seg_idx
     ):
-        cmp_zs = seg.get_final_multi_bi_zs()
-        if cmp_zs is None:
+        if next_seg is None or next_seg_idx >= len(seg_list):
             return
-        if not bsp1_bi:
+        if next_seg_idx+1 >= len(seg_list):
+            # æžšåæ­‡
             return
-        if BSP_CONF.strict_bsp3 and (cmp_zs.bi_out is None or cmp_zs.bi_out.idx != bsp1_bi.idx):
+        bi_end_idx = cal_bsp3_bi_end_idx(seg_list[next_seg_idx+1])
+        if bi_end_idx == float("inf"):
             return
-        end_bi_idx = cal_bsp3_bi_end_idx(next_seg)
-        for bsp3_bi in bi_list[bsp1_bi.idx+2::2]:
-            if bsp3_bi.idx > end_bi_idx:
-                break
-            assert bsp3_bi.seg_idx is not None
-            if bsp3_bi.seg_idx != next_seg_idx and bsp3_bi.seg_idx < len(seg_list)-1:
-                break
-            if bsp3_back2zs(bsp3_bi, cmp_zs):  # type: ignore
+        # Fix: using start_bi instead of begin_bi
+        if next_seg_idx+2 < len(seg_list) and (bi_end_idx >= seg_list[next_seg_idx+2].start_bi.idx):
+            return  # ç»"æžšä½ç½®è·¨è¿‡ä¸‹ä¸€ä¸ªçº¿æ®µï¼Œåœæ­¢
+        if next_seg.get_multi_bi_zs_cnt() == 0:
+            return
+        cmp_zs = None
+        if next_seg.get_multi_bi_zs_cnt() == 0:
+            return
+        for zs in next_seg.zs_lst:
+            if zs.is_one_bi_zs():
                 continue
-            kl_data = bsp3_bi.get_end_klu()
-            macd_item = getattr(kl_data, 'macd', None)
-            macd_value = getattr(macd_item, 'macd', None)
-            macd_diff = getattr(macd_item, 'DIF', None)
-            macd_dea = getattr(macd_item, 'DEA', None)
-            macd_fast = getattr(macd_item, 'fast_ema', None)
-            macd_slow = getattr(macd_item, 'slow_ema', None)
-            
-            kdj_item = getattr(kl_data, 'kdj', None)
-            k_value = getattr(kdj_item, 'k', None)
-            d_value = getattr(kdj_item, 'd', None)
-            j_value = getattr(kdj_item, 'j', None)
-
-            ppo = (macd_fast - macd_slow) / macd_slow
-            feature_dict = {
-                'bsp3_zs_height': (cmp_zs.high - cmp_zs.low) / cmp_zs.low,
-                'bsp3_bi_amp': bsp3_bi.amp(),
-                'bsp3_bi_klu_cnt': bsp3_bi.get_klu_cnt(),
-                'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
-                'macd_value': macd_value,
-                'macd_dea': macd_dea,
-                'macd_diff': macd_diff,
-                'ppo': ppo,
-                'rsi': getattr(kl_data, 'rsi', None),
-                'kdj_k': k_value,
-                'kdj_d': d_value,
-                'kdj_j': j_value,
-                'volume': getattr(kl_data, 'volume', None),
-                'next_bi_return': self.safe_get_next_bi_return(bi_list, bsp3_bi.idx),
-            }
-            self.add_bs(bs_type=BSP_TYPE.T3B, bi=bsp3_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
+            cmp_zs = zs
             break
+        if cmp_zs is None or cmp_zs.bi_out is None:
+            return
+        if bi_end_idx > cmp_zs.bi_out.idx or next_seg.bi_list[-1].idx < cmp_zs.bi_out.idx:
+            return
+        if bi_end_idx+1 >= len(bi_list):
+            # æžšåæ­‡
+            return
+        bsp3_bi = bi_list[bi_end_idx+1]
+        if bsp3_bi.dir == next_seg.dir:
+            return
+        if bsp3_bi.seg_idx != next_seg.idx+1 and next_seg.idx < len(seg_list)-2:
+            return
 
+        if bsp3_back2zs(bsp3_bi, cmp_zs):
+            return
+        bsp3_peak_zs = bsp3_break_zspeak(bsp3_bi, cmp_zs)
+        if BSP_CONF.bsp3_peak and not bsp3_peak_zs:
+            return
+        kl_data = bsp3_bi.get_end_klu()
+        macd_item = getattr(kl_data, 'macd', None)
+        macd_value = getattr(macd_item, 'macd', None)
+        macd_diff = getattr(macd_item, 'DIF', None)
+        macd_dea = getattr(macd_item, 'DEA', None)
+        macd_fast = getattr(macd_item, 'fast_ema', None)
+        macd_slow = getattr(macd_item, 'slow_ema', None)
+
+        kdj_item = getattr(kl_data, 'kdj', None)
+        k_value = getattr(kdj_item, 'k', None)
+        d_value = getattr(kdj_item, 'd', None)
+        j_value = getattr(kdj_item, 'j', None)
+
+        ppo = (macd_fast - macd_slow) / macd_slow
+        feature_dict = {
+            'bsp3_zs_height': (cmp_zs.high - cmp_zs.low) / cmp_zs.low,
+            'bsp3_bi_amp': bsp3_bi.amp(),
+            'bsp3_bi_klu_cnt': bsp3_bi.get_klu_cnt(),
+            'bsp3_bi_amp_rate': bsp3_bi.amp()/bsp3_bi.get_begin_val(),
+            'macd_value': macd_value,
+            'macd_dea': macd_dea,
+            'macd_diff': macd_diff,
+            'ppo': ppo,
+            'rsi': getattr(kl_data, 'rsi', None),
+            'kdj_k': k_value,
+            'kdj_d': d_value,
+            'kdj_j': j_value,
+            'volume': getattr(kl_data, 'volume', None),
+            'next_bi_return': self.safe_get_next_bi_return(bi_list, bsp3_bi.idx),
+        }
+        self.add_bs(bs_type=BSP_TYPE.T3B, bi=bsp3_bi, relate_bsp1=real_bsp1, feature_dict=feature_dict)  # type: ignore
+        
     def getSortedBspList(self) -> List[CBS_Point[LINE_TYPE]]:
-        return sorted(self.bsp_iter(), key=lambda bsp: bsp.bi.idx)
+        sorted_bsps = sorted(self.bsp_iter(), key=lambda bsp: bsp.bi.idx)
+        # Make sure all BSPs have standardized features before returning
+        for bsp in sorted_bsps:
+            self.standardize_features_for_bsp(bsp)
+        return sorted_bsps
     
     def safe_get_next_bi_return(self, bi_list, current_idx):
         if current_idx + 1 < len(bi_list):
@@ -566,11 +730,15 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
     
     def get_bs_list(self, bs_type, is_buy=True):
         """
-        获取指定类型和买卖方向的 BS 点列表。
+        Get the BS point list for a specific type and direction
         """
         if bs_type not in self.bsp_store_dict:
             return []
-        return self.bsp_store_dict[bs_type][0 if is_buy else 1]
+        bsp_list = self.bsp_store_dict[bs_type][0 if is_buy else 1]
+        # Ensure all BSPs have standardized features before returning
+        for bsp in bsp_list:
+            self.standardize_features_for_bsp(bsp)
+        return bsp_list
 
 
 def bsp2s_break_bsp1(bsp2s_bi: LINE_TYPE, bsp2_break_bi: LINE_TYPE) -> bool:
@@ -599,4 +767,3 @@ def cal_bsp3_bi_end_idx(seg: Optional[CSeg[LINE_TYPE]]):
             end_bi_idx = zs.bi_out.idx
             break
     return end_bi_idx
-

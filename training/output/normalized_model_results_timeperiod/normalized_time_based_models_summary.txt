@@ -1,0 +1,106 @@
+Normalized Sliding Window Chan Models with Time-Based Splits - Summary Report
+================================================================================
+
+DATA NORMALIZATION APPROACH:
+  This model utilizes normalized features from the sliding window Chan analysis,
+  focusing on relative patterns rather than absolute price levels to improve
+  generalization and pattern recognition across different market conditions.
+
+TIME-BASED SPLIT STRATEGY:
+  Training period: 2017-06-15 to 2017-09-15
+  Random split within training period: 85.0% train, 15.0% validation
+  Test1: 2 weeks (15 days) after training period
+  Test2: 1 month (15 days) after Test1 period
+
+DATA SPLIT:
+  Training set:
+    Total valid signals:   1992 samples
+    Buy signals:     829 samples ( 41.6%)
+    Sell signals:   1163 samples ( 58.4%)
+  Validation set:
+    Total valid signals:    352 samples
+    Buy signals:     136 samples ( 38.6%)
+    Sell signals:    216 samples ( 61.4%)
+  Test1 set:
+    Total valid signals:    289 samples
+    Buy signals:      89 samples ( 30.8%)
+    Sell signals:    200 samples ( 69.2%)
+  Test2 set:
+    Total valid signals:    366 samples
+    Buy signals:     108 samples ( 29.5%)
+    Sell signals:    258 samples ( 70.5%)
+
+NORMALIZED BUY MODEL PERFORMANCE (TIME-BASED):
+  Training:
+    RMSE: 0.0014%
+    MAE:  0.0010%
+    R²:   1.0000
+    Acc:  100.00%
+  Validation:
+    RMSE: 0.1697%
+    MAE:  0.1190%
+    R²:   0.7212
+    Acc:  90.44%
+  Test1:
+    RMSE: 0.2181%
+    MAE:  0.1807%
+    R²:   -0.9978
+    Acc:  67.42%
+  Test2:
+    RMSE: 0.2523%
+    MAE:  0.2103%
+    R²:   -2.1571
+    Acc:  67.59%
+
+NORMALIZED SELL MODEL PERFORMANCE (TIME-BASED):
+  Training:
+    RMSE: 0.0031%
+    MAE:  0.0022%
+    R²:   0.9999
+    Acc:  99.57%
+  Validation:
+    RMSE: 0.1318%
+    MAE:  0.0924%
+    R²:   0.7712
+    Acc:  88.89%
+  Test1:
+    RMSE: 0.2191%
+    MAE:  0.1678%
+    R²:   -0.4508
+    Acc:  83.00%
+  Test2:
+    RMSE: 0.2017%
+    MAE:  0.1697%
+    R²:   -1.2988
+    Acc:  65.89%
+
+COMBINED BENEFITS OF NORMALIZATION AND TIME-BASED VALIDATION:
+  1. Enhanced pattern recognition across different market regimes
+  2. Better generalization to unseen data from future market periods
+  3. Realistic simulation of real-world trading conditions with forward testing
+  4. Reduced impact of market-specific absolute price levels
+  5. Improved assessment of model stability across time periods
+
+TOP 10 NORMALIZED BUY MODEL FEATURES (TIME-BASED):
+  66. ma_5                                    : 0.0945
+  70. ma_20                                   : 0.0571
+  49. norm_close                              : 0.0472
+  68. ma_10                                   : 0.0367
+  90. feat_bsp2s_lv                           : 0.0322
+  78. feat_bsp2_break_bi_bi_klu_cnt           : 0.0319
+  29. feat_level                              : 0.0294
+   3. klu_low                                 : 0.0275
+  85. feat_bsp2s_break_bi_klu_cnt             : 0.0263
+  48. norm_low                                : 0.0244
+
+TOP 10 NORMALIZED SELL MODEL FEATURES (TIME-BASED):
+  77. feat_bsp2_break_bi_amp                  : 0.0757
+  86. feat_bsp2s_break_bi_amp_rate            : 0.0597
+  85. feat_bsp2s_break_bi_klu_cnt             : 0.0462
+  56. norm_kdj_d                              : 0.0382
+  84. feat_bsp2s_break_bi_amp                 : 0.0381
+   4. klu_close                               : 0.0328
+  68. ma_10                                   : 0.0323
+  70. ma_20                                   : 0.0299
+  78. feat_bsp2_break_bi_bi_klu_cnt           : 0.0292
+  29. feat_level                              : 0.0281

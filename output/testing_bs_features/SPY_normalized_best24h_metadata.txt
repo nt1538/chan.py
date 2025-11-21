@@ -1,0 +1,37 @@
+Normalized Testing Dataset with BEST within 24h Logic
+==================================================
+
+NORMALIZATION:
+------------------------------
+Method: z-score normalization
+Window-based: True
+Window size: 50 K-lines
+Normalized features: 15
+Pattern features: 6
+
+PROFIT TARGET CALCULATION:
+------------------------------
+Method: BEST reverse signal within 120 bars (~24 hours)
+Logic:
+  - BUY signals: Find SELL with HIGHEST price in window
+  - SELL signals: Find BUY with LOWEST price in window
+  - Fallback: Uses next reverse if no signal in window
+
+SLIDING WINDOW CONFIGURATION:
+------------------------------
+Window Size: 1000 K-lines
+Final Window Position: idx 45481
+Total BSP Collected: 9399
+
+CONFIGURATION:
+------------------------------
+Ticker: SPY
+Period: 2018-01-01 to 2018-12-31
+Level: K_5M
+Time Window: 120 bars (~24 hours)
+Total Samples: 9399
+Samples with Targets: 9397
+
+Exit Type Distribution:
+  best_24h: 8786 (93.5%)
+  fallback_next: 611 (6.5%)
