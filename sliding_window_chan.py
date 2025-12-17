@@ -69,10 +69,12 @@ class SlidingWindowChan:
         
         # Store last Chan instance for compatibility
         self.last_chan: Optional[CChan] = None
+        self._export_cursor = 0   # <--- add this
 
     # ----------------------------------------------------------------------
     #  Internal helpers
     # ----------------------------------------------------------------------
+    
     
     def _load_all_klines(self) -> List[CKLine_Unit]:
         """
@@ -422,6 +424,21 @@ class SlidingWindowChan:
         Compatible with your existing dataset generation code.
         """
         return self.get_all_historical_bsp()
+    
+    def export_new_historical_bsp_to_list(self):
+        """
+        Incremental version of export_historical_bsp_to_list().
+        Returns only BSP rows appended since last call.
+        Output dict schema stays identical to export_historical_bsp_to_list().
+        """
+        all_rows = self.export_historical_bsp_to_list()
+        if self._export_cursor >= len(all_rows):
+            return []
+
+        new_rows = all_rows[self._export_cursor:]
+        self._export_cursor = len(all_rows)
+        return new_rows
+    
     
     # Compatibility properties for existing code
     @property
