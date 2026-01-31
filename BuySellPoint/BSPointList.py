@@ -654,7 +654,7 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
             return
         # Fix: using start_bi instead of begin_bi
         if next_seg_idx+2 < len(seg_list) and (bi_end_idx >= seg_list[next_seg_idx+2].start_bi.idx):
-            return  # ç»"æžšä½ç½®è·¨è¿‡ä¸‹ä¸€ä¸ªçº¿æ®µï¼Œåœæ­¢
+            return  
         if next_seg.get_multi_bi_zs_cnt() == 0:
             return
         cmp_zs = None
@@ -670,7 +670,6 @@ class CBSPointList(Generic[LINE_TYPE, LINE_LIST_TYPE]):
         if bi_end_idx > cmp_zs.bi_out.idx or next_seg.bi_list[-1].idx < cmp_zs.bi_out.idx:
             return
         if bi_end_idx+1 >= len(bi_list):
-            # æžšåæ­‡
             return
         bsp3_bi = bi_list[bi_end_idx+1]
         if bsp3_bi.dir == next_seg.dir:
