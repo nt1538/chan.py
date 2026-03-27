@@ -1,67 +1,135 @@
 # ============================================================
-# DAILY (Chan BSP-based Prob) + 5m Chan/XGB trading engine
-# + DAILY GATE that triggers "WAIT FOR FIRST ACCEPTABLE 5m SIGNAL" (NOT immediate)
-#
-# Daily part (REPLACED):
-# - Builds a DAILY Chan (K_DAY) and extracts DAILY BSP signals
-# - Creates a walk-forward probability model p_day using:
-#     * daily kline features
-#     * daily BSP context features (last dir, days since, density, imbalance)
-#     * simple regime from BSP chain endpoints (up/down/unknown)
-#     * base_dir (latest BSP direction up to that day)
-#     * dp features (p - min/max over lookback)
-# - Labels are generated via your "extreme confirmation" rule:
-#     base_dir == 'sell': y=1 if max(high next N) < high(t0) else 0
-#     base_dir == 'buy' : y=1 if min(low  next N) > low(t0)  else 0
-#
-# 5m part (UNCHANGED):
-# - Accumulate 5m BSP rows, label best_return_pct after lookahead
-# - Train XGB regressors for buy/sell predicted best_return_pct
-# - Optimize thresholds by realized simulation
-# - Execute at next open, gated by daily p_day
-#
-# Outputs:
-# - output_dir/trades.csv
-# - output_dir/daily_log.csv
-# - output_dir/equity_vs_buyhold.png
-# - output_dir/price_with_trades.png
-# - output_dir/p_day.png
-# - output_dir/daily_lr_feature_importance.csv
+# FULL CHECKPOINT / RESUME CODE
+# + DAILY MACRO / INDEX FEATURES
+# + YIELD CURVE FEATURE
+# + DAILY LR PROB MODEL
+# + DAILY CONTEXTUAL BANDIT GATE (NO MANUAL THRESHOLDS)
+# + 5M XGB TRADING MODEL
 # ============================================================
 
 import os
+import copy
+import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
 from dataclasses import dataclass
-from typing import Dict, Any, List, Optional, Tuple
-
+from typing import List, Optional, Any, Dict, Tuple
 import xgboost as xgb
-from sklearn.impute import SimpleImputer
 
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MaxAbsScaler
+from sklearn.impute import SimpleImputer
 
-# Project imports
+# ---- your Chan imports ----
 from sliding_window_chan import SlidingWindowChan
 from ChanConfig import CChanConfig
 from Common.CEnum import DATA_FIELD, KL_TYPE, AUTYPE
-from KLine.KLine_Unit import CKLine_Unit
-from Common.CTime import CTime
-
 try:
     from Common.CEnum import DATA_SRC
 except Exception:
     class DATA_SRC:
         CSV = "CSV"
+from KLine.KLine_Unit import CKLine_Unit
+from Common.CTime import CTime
 
 
 # ============================================================
-# 0) Shared utilities
+# BACKWARD-COMPAT CLASS DEFINITIONS
+# ============================================================
+
+@dataclass
+class RetModelPack:
+    feature_cols: List[str]
+    model_ret: xgb.XGBRegressor
+
+@dataclass
+class DailyProbState:
+    model: Optional[Any] = None
+    new_labels: int = 0
+    trained_n: int = 0
+
+
+# ============================================================
+# DAILY BANDIT DEFINITIONS
+# ============================================================
+
+class BanditAction:
+    FORCE_BUY = 0
+    FREE = 1
+    FORCE_SELL = 2
+
+ACTION_TO_NAME = {
+    BanditAction.FORCE_BUY: "FORCE_BUY",
+    BanditAction.FREE: "FREE",
+    BanditAction.FORCE_SELL: "FORCE_SELL",
+}
+NAME_TO_ACTION = {v: k for k, v in ACTION_TO_NAME.items()}
+
+
+class LinUCBBandit:
+    """
+    Contextual bandit for daily gate:
+      actions = FORCE_BUY / FREE / FORCE_SELL
+
+    score_a = theta_a^T x + alpha * sqrt(x^T A_a^-1 x)
+    """
+    def __init__(self, n_actions: int, n_features: int, alpha: float = 0.75, l2: float = 1.0):
+        self.n_actions = int(n_actions)
+        self.n_features = int(n_features)
+        self.alpha = float(alpha)
+        self.l2 = float(l2)
+
+        self.A = [np.eye(self.n_features, dtype=float) * self.l2 for _ in range(self.n_actions)]
+        self.b = [np.zeros(self.n_features, dtype=float) for _ in range(self.n_actions)]
+
+    def select_action(self, x: np.ndarray) -> int:
+        x = np.asarray(x, dtype=float).reshape(-1)
+        scores = []
+        for a in range(self.n_actions):
+            A_inv = np.linalg.inv(self.A[a])
+            theta = A_inv @ self.b[a]
+            mean = float(theta @ x)
+            bonus = self.alpha * float(np.sqrt(max(0.0, x @ A_inv @ x)))
+            scores.append(mean + bonus)
+        return int(np.argmax(scores))
+
+    def update(self, action: int, x: np.ndarray, reward: float):
+        x = np.asarray(x, dtype=float).reshape(-1)
+        a = int(action)
+        r = float(reward)
+        self.A[a] += np.outer(x, x)
+        self.b[a] += r * x
+
+    def state_dict(self) -> dict:
+        return {
+            "n_actions": self.n_actions,
+            "n_features": self.n_features,
+            "alpha": self.alpha,
+            "l2": self.l2,
+            "A": self.A,
+            "b": self.b,
+        }
+
+    @classmethod
+    def from_state_dict(cls, d: dict):
+        obj = cls(
+            n_actions=int(d["n_actions"]),
+            n_features=int(d["n_features"]),
+            alpha=float(d["alpha"]),
+            l2=float(d["l2"]),
+        )
+        obj.A = d["A"]
+        obj.b = d["b"]
+        return obj
+
+
+# ============================================================
+# BASIC HELPERS
 # ============================================================
 
 def _safe_div(a, b, eps=1e-12):
@@ -77,6 +145,45 @@ def _pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
         if c.lower() in lower_map:
             return lower_map[c.lower()]
     return None
+
+def save_joblib(path: str, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    joblib.dump(obj, path, compress=3)
+
+def load_joblib(path: str):
+    return joblib.load(path)
+
+def _safe_copy_list_of_dict(lst):
+    if lst is None:
+        return []
+    out = []
+    for x in lst:
+        try:
+            out.append(dict(x))
+        except Exception:
+            pass
+    return out
+
+def _safe_set_to_list(s):
+    if s is None:
+        return []
+    return list(s)
+
+def _safe_list_to_set(lst):
+    if lst is None:
+        return set()
+    out = set()
+    for x in lst:
+        if isinstance(x, list):
+            out.add(tuple(x))
+        else:
+            out.add(x)
+    return out
+
+
+# ============================================================
+# OHLCV CSV LOADER
+# ============================================================
 
 def load_ohlcv_csv(path: str, freq_name: str) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -96,8 +203,10 @@ def load_ohlcv_csv(path: str, freq_name: str) -> pd.DataFrame:
 
     if open_col is None or close_col is None:
         raise ValueError(f"{freq_name} CSV must contain open/close columns.")
-    if high_col is None: high_col = close_col
-    if low_col  is None: low_col  = close_col
+    if high_col is None:
+        high_col = close_col
+    if low_col is None:
+        low_col = close_col
 
     df["_open"]  = pd.to_numeric(df[open_col], errors="coerce").astype(float)
     df["_high"]  = pd.to_numeric(df[high_col], errors="coerce").astype(float)
@@ -111,7 +220,110 @@ def load_ohlcv_csv(path: str, freq_name: str) -> pd.DataFrame:
 
 
 # ============================================================
-# 1) Chan builders
+# DAILY KLINE FEATURES
+# ============================================================
+
+KLINE_KEYS = [
+    "ret1","ret_5","ret_10","ret_20","ret_40",
+    "vol_5","vol_10","vol_20","vol_40",
+    "atr_14","range_over_atr","close_pos","gap",
+    "above_ma_20","above_ma_50","above_ma_100",
+    "slope40",
+]
+
+def compute_daily_kline_features(df_day: pd.DataFrame) -> pd.DataFrame:
+    d = df_day.copy().sort_values("timestamp").reset_index(drop=True)
+    o = d["_open"].astype(float)
+    h = d["_high"].astype(float)
+    l = d["_low"].astype(float)
+    c = d["_close"].astype(float)
+
+    prev_c = c.shift(1)
+    d["ret1"] = (_safe_div(c, prev_c) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    tr = pd.concat([(h-l).abs(), (h-prev_c).abs(), (l-prev_c).abs()], axis=1).max(axis=1)
+    d["tr"] = tr.fillna(0.0)
+    d["atr_14"] = d["tr"].rolling(14).mean().bfill().fillna(0.0)
+
+    d["range"] = (h - l).fillna(0.0)
+    d["range_over_atr"] = _safe_div(d["range"], d["atr_14"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    rng = (h - l).replace(0.0, np.nan)
+    d["close_pos"] = ((c - l) / rng).replace([np.inf, -np.inf], np.nan).fillna(0.5)
+    d["gap"] = (_safe_div(o, prev_c) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    for w in [5, 10, 20, 40]:
+        d[f"ret_{w}"] = (_safe_div(c, c.shift(w)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        d[f"vol_{w}"] = d["ret1"].rolling(w).std().replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    for w in [20, 50, 100]:
+        ma = c.rolling(w).mean()
+        d[f"above_ma_{w}"] = (_safe_div(c, ma) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    def _slope_log(x):
+        x = np.asarray(x, dtype=float)
+        x = np.log(np.maximum(x, 1e-12))
+        t = np.arange(len(x), dtype=float)
+        t = t - t.mean()
+        x = x - x.mean()
+        den = (t*t).sum()
+        return 0.0 if den <= 0 else float((t*x).sum() / den)
+
+    d["slope40"] = d["_close"].rolling(40).apply(_slope_log, raw=False).fillna(0.0)
+    return d
+
+def make_kline_dict(row: pd.Series) -> Dict[str, float]:
+    out = {}
+    for k in KLINE_KEYS:
+        val = row[k] if k in row.index else 0.0
+        out[f"k_{k}"] = float(val) if np.isfinite(val) else 0.0
+    return out
+
+
+# ============================================================
+# MACRO / INDEX FEATURES
+# ============================================================
+
+def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: str) -> pd.DataFrame:
+    out = None
+
+    for pref, fn in files.items():
+        path = os.path.join(folder, fn)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Macro file not found: {path}")
+
+        dfm = load_ohlcv_csv(path, pref.upper())
+        dfm = dfm[dfm["timestamp"] >= pd.to_datetime(start)].copy().reset_index(drop=True)
+        dfm["ts_norm"] = pd.to_datetime(dfm["timestamp"]).dt.normalize()
+
+        dfm_feat = compute_daily_kline_features(dfm)
+        dfm_feat[f"{pref}level"] = dfm_feat["_close"].astype(float)
+
+        keep_cols = ["ts_norm", f"{pref}level"] + KLINE_KEYS
+        dfm_feat = dfm_feat[keep_cols].copy()
+
+        rename = {k: f"{pref}{k}" for k in KLINE_KEYS}
+        dfm_feat = dfm_feat.rename(columns=rename)
+
+        out = dfm_feat.copy() if out is None else out.merge(dfm_feat, on="ts_norm", how="outer")
+
+    if out is None:
+        out = pd.DataFrame(columns=["ts_norm"])
+
+    if ("us10y_level" in out.columns) and ("us5y_level" in out.columns):
+        out["yc_10y5y_level"] = out["us10y_level"] - out["us5y_level"]
+
+        prev = out["yc_10y5y_level"].shift(1)
+        out["yc_10y5y_ret1"] = (_safe_div(out["yc_10y5y_level"], prev) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+        for w in [5, 10, 20, 40]:
+            out[f"yc_10y5y_chg_{w}"] = (out["yc_10y5y_level"] - out["yc_10y5y_level"].shift(w)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    return out.sort_values("ts_norm").reset_index(drop=True)
+
+
+# ============================================================
+# CHAN BUILDERS
 # ============================================================
 
 def to_ctime(ts) -> CTime:
@@ -161,79 +373,7 @@ def feed_chan_one(chan_obj, klu: CKLine_Unit):
 
 
 # ============================================================
-# 2) DAILY features
-# ============================================================
-
-KLINE_KEYS = [
-    "ret1","ret_5","ret_10","ret_20","ret_40",
-    "vol_5","vol_10","vol_20","vol_40",
-    "atr_14","range_over_atr","close_pos","gap",
-    "vol_ratio_5","vol_ratio_20","vol_ratio_60",
-    "vol_z_20","vol_z_60","vol_jump",
-    "above_ma_20","above_ma_50","above_ma_100",
-    "slope40",
-]
-
-def compute_daily_kline_features(df_day: pd.DataFrame) -> pd.DataFrame:
-    d = df_day.copy().sort_values("timestamp").reset_index(drop=True)
-    o = d["_open"].astype(float)
-    h = d["_high"].astype(float)
-    l = d["_low"].astype(float)
-    c = d["_close"].astype(float)
-    v = d["_vol"].astype(float)
-
-    prev_c = c.shift(1)
-    d["ret1"] = (_safe_div(c, prev_c) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    tr = pd.concat([(h-l).abs(), (h-prev_c).abs(), (l-prev_c).abs()], axis=1).max(axis=1)
-    d["tr"] = tr.fillna(0.0)
-    d["atr_14"] = d["tr"].rolling(14).mean().bfill().fillna(0.0)
-
-    d["range"] = (h - l).fillna(0.0)
-    d["range_over_atr"] = _safe_div(d["range"], d["atr_14"]).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    rng = (h - l).replace(0.0, np.nan)
-    d["close_pos"] = ((c - l) / rng).replace([np.inf, -np.inf], np.nan).fillna(0.5)
-    d["gap"] = (_safe_div(o, prev_c) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    for w in [5, 10, 20, 40]:
-        d[f"ret_{w}"] = (_safe_div(c, c.shift(w)) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-        d[f"vol_{w}"] = d["ret1"].rolling(w).std().replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    for w in [20, 50, 100]:
-        ma = c.rolling(w).mean()
-        d[f"above_ma_{w}"] = (_safe_div(c, ma) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    for w in [5, 20, 60]:
-        m = v.rolling(w).mean()
-        s = v.rolling(w).std()
-        d[f"vol_ratio_{w}"] = _safe_div(v, m).replace([np.inf, -np.inf], np.nan).fillna(1.0)
-        d[f"vol_z_{w}"] = ((v - m) / (s + 1e-12)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
-    d["vol_jump"] = _safe_div(v, v.shift(1)).replace([np.inf, -np.inf], np.nan).fillna(1.0)
-
-    def _slope_log(x):
-        x = np.asarray(x, dtype=float)
-        x = np.log(np.maximum(x, 1e-12))
-        t = np.arange(len(x), dtype=float)
-        t = t - t.mean()
-        x = x - x.mean()
-        den = (t*t).sum()
-        return 0.0 if den <= 0 else float((t*x).sum() / den)
-
-    d["slope40"] = d["_close"].rolling(40).apply(_slope_log, raw=False).fillna(0.0)
-    return d
-
-def make_kline_dict(row: pd.Series) -> Dict[str, float]:
-    out = {}
-    for k in KLINE_KEYS:
-        val = row[k] if k in row.index else 0.0
-        out[f"k_{k}"] = float(val) if np.isfinite(val) else 0.0
-    return out
-
-
-# ============================================================
-# 3) DAILY BSP helpers
+# DAILY BSP HELPERS
 # ============================================================
 
 def normalize_bsp_row(r: Dict[str, Any]) -> Dict[str, Any]:
@@ -284,6 +424,7 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
             "ctx_density_sell": 0.0,
             "ctx_density_imb": 0.0,
         }
+
     last = past[-1]
     last_dir = str(last.get("direction", "")).lower()
     days_since_last = float((cur_ts.normalize() - pd.to_datetime(last["timestamp"]).normalize()).days)
@@ -338,7 +479,8 @@ def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]])
     if len(ends) < 2:
         return "unknown"
     for k in range(len(ends) - 1):
-        a = ends[k]; b = ends[k+1]
+        a = ends[k]
+        b = ends[k + 1]
         a_ts, a_dir = a["end_ts"], a["end_dir"]
         b_ts, b_dir = b["end_ts"], b["end_dir"]
         if (day_norm >= a_ts) and (day_norm <= b_ts):
@@ -350,7 +492,7 @@ def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]])
 
 
 # ============================================================
-# 4) Daily label + model
+# DAILY LABEL + MODEL
 # ============================================================
 
 def label_confirm_extreme(df_day_feat: pd.DataFrame, idx: int, N: int, base_dir: str) -> Optional[int]:
@@ -379,9 +521,16 @@ def make_daily_features_one_model(
     dp_maxK: float,
     regime: str,
     base_dir: Optional[str],
+    macro_cols: Optional[List[str]] = None,
 ) -> Dict[str, float]:
     feats: Dict[str, float] = {}
     feats.update(make_kline_dict(kline_row))
+
+    if macro_cols is not None:
+        for c in macro_cols:
+            if c in kline_row.index:
+                val = kline_row[c]
+                feats[c] = float(val) if np.isfinite(val) else 0.0
 
     ts = pd.to_datetime(kline_row["timestamp"])
     feats.update(make_daily_bsp_context(bsp_hist_up_to_day, ts, window_days=60))
@@ -461,29 +610,9 @@ def feature_importance_from_lr(model, top_n: int = 80) -> pd.DataFrame:
     df_imp["abs_coef"] = df_imp["coef"].abs()
     return df_imp.sort_values("abs_coef", ascending=False).head(int(top_n)).reset_index(drop=True)
 
-@dataclass
-class DailyProbState:
-    model: Optional[Any] = None
-    new_labels: int = 0
-    trained_n: int = 0
-
 
 # ============================================================
-# 5) Gate logic (daily)
-# ============================================================
-
-def gate_from_p(p_day: float, p_sell_level: float, p_buy_level: float) -> str:
-    if not np.isfinite(p_day):
-        return "NO_P"
-    if p_day >= p_sell_level:
-        return "FORCE_SELL"
-    if p_day <= p_buy_level:
-        return "FORCE_BUY"
-    return "FREE"
-
-
-# ============================================================
-# 6) 5m model + thresholds (your old system)
+# 5M MODEL + THRESHOLDS
 # ============================================================
 
 LABEL_COLS = {"best_return_pct"}
@@ -533,11 +662,6 @@ def to_float_matrix(df: pd.DataFrame, cols: List[str]) -> np.ndarray:
     X = X.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return X.to_numpy(dtype=np.float32, copy=False)
 
-@dataclass
-class RetModelPack:
-    feature_cols: List[str]
-    model_ret: xgb.XGBRegressor
-
 def _fit_ret_pack(df_dir: pd.DataFrame, feature_cols: List[str], seed: int) -> RetModelPack:
     ret_df = df_dir.dropna(subset=["best_return_pct"]).copy()
     X = to_float_matrix(ret_df, feature_cols)
@@ -560,9 +684,10 @@ def train_models_two_sided_ret_only(
     bsp_df: pd.DataFrame,
     feature_cols: List[str],
     min_samples_total: int = 300,
-) -> Tuple[Optional[RetModelPack], Optional[RetModelPack]]:
+):
     if bsp_df.empty or "direction" not in bsp_df.columns:
         return None, None
+
     df = bsp_df.copy()
     for c in feature_cols:
         if c not in df.columns:
@@ -632,21 +757,21 @@ def label_bestlookahead_for_ready_points(
 
 def _simulate_realized_ret_only_long(
     events: List[Dict[str, Any]],
-    pred_buy: Dict[Tuple, float],
-    pred_sell: Dict[Tuple, float],
+    pred_buy: Dict[Any, float],
+    pred_sell: Dict[Any, float],
     buy_th: float,
     sell_th: float,
     next_open_by_idx: np.ndarray,
     closes: np.ndarray,
     end_bar_idx: int,
     fee_pct: float = 0.0,
-) -> Tuple[float, int]:
+):
     cash = 1.0
     pos = 0
     qty = 0.0
     trades = 0
 
-    def exec_next_open(idx: int) -> Optional[float]:
+    def exec_next_open(idx: int):
         if not (0 <= idx < len(next_open_by_idx)):
             return None
         px = next_open_by_idx[idx]
@@ -700,7 +825,7 @@ def choose_thresholds_global_realized(
     closes: np.ndarray,
     fee_pct: float = 0.0,
     min_open_signals: int = 10,
-) -> Optional[Tuple[float, float]]:
+):
     if df_5m.empty or not bsp_rows or buy_pack is None or sell_pack is None:
         return None
 
@@ -770,7 +895,7 @@ def choose_thresholds_global_realized(
 
 
 # ============================================================
-# 7) Execution engine (next_open execution)
+# EXECUTION ENGINE
 # ============================================================
 
 class ExecutionEngine:
@@ -784,7 +909,7 @@ class ExecutionEngine:
         self.pending_order = None
         self.trades = []
 
-    def _exec_px(self, seen_idx: int, next_open_by_idx: np.ndarray) -> Optional[float]:
+    def _exec_px(self, seen_idx: int, next_open_by_idx: np.ndarray):
         if not (0 <= seen_idx < len(next_open_by_idx)):
             return None
         px = next_open_by_idx[seen_idx]
@@ -845,9 +970,31 @@ class ExecutionEngine:
             return float(self.cash)
         return float(self.cash + self.qty * px)
 
+    def state_dict(self) -> dict:
+        return {
+            "cash": self.cash,
+            "fee_pct": self.fee_pct,
+            "pos": self.pos,
+            "qty": self.qty,
+            "entry_px": self.entry_px,
+            "entry_idx": self.entry_idx,
+            "pending_order": copy.deepcopy(self.pending_order),
+            "trades": copy.deepcopy(self.trades),
+        }
+
+    def load_state_dict(self, d: dict):
+        self.cash = float(d.get("cash", self.cash))
+        self.fee_pct = float(d.get("fee_pct", self.fee_pct))
+        self.pos = int(d.get("pos", 0))
+        self.qty = float(d.get("qty", 0.0))
+        self.entry_px = d.get("entry_px", None)
+        self.entry_idx = d.get("entry_idx", None)
+        self.pending_order = copy.deepcopy(d.get("pending_order", None))
+        self.trades = copy.deepcopy(d.get("trades", []))
+
 
 # ============================================================
-# 8) 5m index load
+# 5M INDEX LOAD
 # ============================================================
 
 def load_5m_index(df_5m: pd.DataFrame, start_time: str, end_time: str):
@@ -892,10 +1039,193 @@ def compute_buy_hold_equity(day_close_map: dict, daily_dates: list, initial_capi
 
 
 # ============================================================
-# 9) MAIN runner
+# BANDIT STATE FOR DAILY GATE
 # ============================================================
 
-def run_daily_prob_then_5m_xgb_gated(
+def make_bandit_state_from_daily_row(
+    kline_row: pd.Series,
+    bsp_hist_up_to_day: List[Dict[str, Any]],
+    p_val: float,
+    dp_minK: float,
+    dp_maxK: float,
+    regime: str,
+    base_dir: Optional[str],
+    macro_cols: Optional[List[str]],
+    current_pos: int,
+    current_gate: str,
+    equity_rel: float,
+    dd_rel: float,
+) -> Dict[str, float]:
+    feats = make_daily_features_one_model(
+        kline_row=kline_row,
+        bsp_hist_up_to_day=bsp_hist_up_to_day,
+        p_val=p_val,
+        dp_minK=dp_minK,
+        dp_maxK=dp_maxK,
+        regime=regime,
+        base_dir=base_dir,
+        macro_cols=macro_cols,
+    )
+    feats["cur_pos"] = float(current_pos)
+    feats["cur_gate_force_buy"] = 1.0 if current_gate == "FORCE_BUY" else 0.0
+    feats["cur_gate_free"] = 1.0 if current_gate == "FREE" else 0.0
+    feats["cur_gate_force_sell"] = 1.0 if current_gate == "FORCE_SELL" else 0.0
+    feats["equity_rel"] = float(equity_rel)
+    feats["drawdown_rel"] = float(dd_rel)
+    return feats
+
+
+# ============================================================
+# CLASS-FREE SERIALIZATION HELPERS
+# ============================================================
+
+def pack_ret_modelpack_for_save(pack):
+    if pack is None:
+        return None
+    return {
+        "__type__": "RetModelPack",
+        "feature_cols": list(pack.feature_cols),
+        "model_ret": pack.model_ret,
+    }
+
+def unpack_ret_modelpack_from_load(obj):
+    if obj is None:
+        return None
+    if isinstance(obj, dict) and obj.get("__type__") == "RetModelPack":
+        return RetModelPack(
+            feature_cols=list(obj["feature_cols"]),
+            model_ret=obj["model_ret"],
+        )
+    return obj
+
+
+# ============================================================
+# CHECKPOINT BUNDLE BUILD / LOAD
+# ============================================================
+
+def build_checkpoint_bundle(
+    *,
+    code: str,
+    checkpoint_time: str,
+
+    original_daily_chan_start: str,
+    original_accumulation_start: str,
+    original_sim_start: str,
+    original_end_time: str,
+
+    macro_files: dict,
+
+    daily_prob_model,
+    daily_prob_trained_n: int,
+    X_days,
+    y_days,
+    pending_idx,
+    p_by_day,
+    p_series,
+    dp_vs_minK_series,
+    dp_vs_maxK_series,
+    bsp_rows_daily,
+    seen_bsp_daily,
+
+    bandit_vec,
+    bandit_state,
+    daily_bandit_log,
+
+    buy_pack,
+    sell_pack,
+    buy_ret_th_live: float,
+    sell_ret_th_live: float,
+
+    bsp_rows_5m,
+    seen_keys_5m,
+
+    engine_state: dict,
+    daily_log,
+
+    daily_i_last: int,
+    five_i_last: int,
+    current_day,
+
+    warmup_daily_bars: pd.DataFrame,
+    warmup_5m_bars: pd.DataFrame,
+
+    daily_chan_max_klines: int,
+    five_chan_max_klines: int,
+):
+    p_by_day_str = {}
+    if p_by_day is not None:
+        for k, v in p_by_day.items():
+            try:
+                p_by_day_str[str(pd.to_datetime(k))] = float(v)
+            except Exception:
+                pass
+
+    bundle = {
+        "schema": "chan_xgb_dailyprob_bandit_checkpoint_v1",
+        "code": code,
+        "checkpoint_time": checkpoint_time,
+
+        "original_daily_chan_start": str(original_daily_chan_start),
+        "original_accumulation_start": str(original_accumulation_start),
+        "original_sim_start": str(original_sim_start),
+        "original_end_time": str(original_end_time),
+
+        "macro_files": copy.deepcopy(macro_files),
+
+        "daily_prob_model": daily_prob_model,
+        "daily_prob_trained_n": int(daily_prob_trained_n),
+
+        "X_days": copy.deepcopy(X_days),
+        "y_days": copy.deepcopy(y_days),
+        "pending_idx": copy.deepcopy(pending_idx),
+
+        "p_by_day_str": p_by_day_str,
+        "p_series": np.asarray(p_series, dtype=float),
+        "dp_vs_minK_series": np.asarray(dp_vs_minK_series, dtype=float),
+        "dp_vs_maxK_series": np.asarray(dp_vs_maxK_series, dtype=float),
+
+        "bsp_rows_daily": _safe_copy_list_of_dict(bsp_rows_daily),
+        "seen_bsp_daily_list": _safe_set_to_list(seen_bsp_daily),
+
+        "bandit_vec": bandit_vec,
+        "bandit_state": bandit_state,
+        "daily_bandit_log": copy.deepcopy(daily_bandit_log),
+
+        "buy_pack": pack_ret_modelpack_for_save(buy_pack),
+        "sell_pack": pack_ret_modelpack_for_save(sell_pack),
+        "buy_ret_th_live": float(buy_ret_th_live),
+        "sell_ret_th_live": float(sell_ret_th_live),
+
+        "bsp_rows_5m": _safe_copy_list_of_dict(bsp_rows_5m),
+        "seen_keys_5m_list": _safe_set_to_list(seen_keys_5m),
+
+        "engine_state": copy.deepcopy(engine_state),
+        "daily_log": copy.deepcopy(daily_log),
+
+        "daily_i_last": int(daily_i_last),
+        "five_i_last": int(five_i_last),
+        "current_day": None if current_day is None else str(current_day),
+
+        "warmup_daily_bars": warmup_daily_bars.reset_index(drop=True),
+        "warmup_5m_bars": warmup_5m_bars.reset_index(drop=True),
+
+        "daily_chan_max_klines": int(daily_chan_max_klines),
+        "five_chan_max_klines": int(five_chan_max_klines),
+    }
+    return bundle
+
+def load_checkpoint_bundle(path: str) -> dict:
+    b = load_joblib(path)
+    if not isinstance(b, dict):
+        raise ValueError("Checkpoint is not a dict.")
+    return b
+
+
+# ============================================================
+# MAIN STRATEGY RUNNER
+# ============================================================
+
+def run_daily_bandit_then_5m_xgb(
     daily_csv_path: str,
     k5m_csv_path: str,
     code: str = "QQQ",
@@ -905,44 +1235,53 @@ def run_daily_prob_then_5m_xgb_gated(
     sim_start: str = "2019-01-01",
     end_time: str = "2019-12-30",
 
-    # Daily confirm horizon
     N_confirm: int = 5,
-
-    # prob training controls
     min_labeled_days_to_train: int = 200,
     retrain_every_new_labels: int = 25,
     dp_lookback: int = 5,
 
-    # gate thresholds
-    p_sell_level: float = 0.30,
-    p_buy_level: float = 0.20,
+    bandit_alpha: float = 0.75,
+    bandit_l2: float = 1.0,
 
-    # 5m model/training
     bar_interval_minutes: int = 5,
     lookahead_days_5m: float = 2.0,
     retrain_every_days_5m: int = 5,
     min_samples_total_5m: int = 300,
 
-    # threshold optimizer
     threshold_window_days: float = 2.0,
-    threshold_ret_grid: Optional[List[float]] = None,
+    threshold_ret_grid=None,
     threshold_min_open_signals: int = 10,
 
-    # portfolio
     initial_capital: float = 100000.0,
     fee_pct: float = 0.0,
 
-    # Chan buffers
     daily_chan_max_klines: int = 500,
     five_chan_max_klines: int = 20000,
 
-    output_dir: str = "output_dailyprob_gated_5m_xgb",
+    macro_files: dict | None = None,
+
+    output_dir: str = "output_daily_bandit_5m_xgb",
     verbose: bool = True,
+
+    save_checkpoint_path: str | None = None,
+    checkpoint_every_n_days: int = 1,
+    resume_from_checkpoint_path: str | None = None,
 ):
     os.makedirs(output_dir, exist_ok=True)
 
+    if macro_files is None:
+        macro_files = {
+            "vix_":   "VIX.csv",
+            "dxy_":   "DXY.csv",
+            "us5y_":  "US5Y.csv",
+            "us10y_": "US10Y.csv",
+            "us30y_": "US30Y.csv",
+            "xau_":   "XAU.csv",
+            "nyxbt_": "NYXBT.csv",
+        }
+
     # ----------------------------
-    # Load data
+    # Load raw data
     # ----------------------------
     df_day_raw = load_ohlcv_csv(daily_csv_path, "DAILY")
     df_5m_raw  = load_ohlcv_csv(k5m_csv_path, "5M")
@@ -956,6 +1295,42 @@ def run_daily_prob_then_5m_xgb_gated(
     if df_day.empty:
         raise ValueError("No daily bars in requested range.")
     df_day_feat = compute_daily_kline_features(df_day)
+    df_day_feat["ts_norm"] = pd.to_datetime(df_day_feat["timestamp"]).dt.normalize()
+
+    macro_folder = os.path.dirname(os.path.abspath(daily_csv_path))
+    macro_feat = load_macro_features_from_folder(
+        folder=macro_folder,
+        files=macro_files,
+        start=daily_chan_start,
+    )
+    df_day_feat = df_day_feat.merge(macro_feat, on="ts_norm", how="left").sort_values("timestamp").reset_index(drop=True)
+
+    macro_cols = [
+        c for c in df_day_feat.columns
+        if (
+            c.startswith("vix_")
+            or c.startswith("dxy_")
+            or c.startswith("us5y_")
+            or c.startswith("us10y_")
+            or c.startswith("us30y_")
+            or c.startswith("xau_")
+            or c.startswith("nyxbt_")
+            or c.startswith("yc_")
+            or c.startswith("10y2ys_")
+            or c.startswith("us2y_")
+            or c.startswith("spy_")
+            or c.startswith("qqq_")
+            or c.startswith("ixic_")
+            or c.startswith("ndx_")
+            or c.startswith("dji_")
+            or c.startswith("vxn_")
+            or c.startswith("vvix_")
+            or c.startswith("vix3m_")
+            or c.startswith("rvx_")
+            or c.startswith("rut_")
+            or c.startswith("spgsci_")
+        )
+    ]
 
     df_5m = df_5m_raw[(df_5m_raw["timestamp"] >= acc_s) & (df_5m_raw["timestamp"] <= end_t + pd.Timedelta(days=1))].copy()
     df_5m = df_5m.sort_values("timestamp").reset_index(drop=True)
@@ -966,7 +1341,7 @@ def run_daily_prob_then_5m_xgb_gated(
     buy_hold = compute_buy_hold_equity(day_close_map, all_days, initial_capital)
 
     # ----------------------------
-    # Chan config
+    # Chan config / objects
     # ----------------------------
     config = CChanConfig({
         "cal_demark": True,
@@ -1015,24 +1390,122 @@ def run_daily_prob_then_5m_xgb_gated(
         max_klines=int(five_chan_max_klines),
     )
 
-    # =========================================================
-    # PHASE 1: DAILY Chan BSP-based probability p_by_day (REPLACED)
-    # =========================================================
-
-    bsp_rows_daily: List[Dict[str, Any]] = []
+    # ----------------------------
+    # Fresh state defaults
+    # ----------------------------
+    bsp_rows_daily = []
     seen_bsp_daily = set()
 
-    X_days: List[Dict[str, float]] = []
-    y_days: List[int] = []
+    X_days = []
+    y_days = []
     st = DailyProbState()
-    pending_idx: List[int] = []
+    pending_idx = []
 
     p_series = np.full(len(df_day_feat), np.nan, dtype=float)
     dp_vs_minK_series = np.full(len(df_day_feat), np.nan, dtype=float)
     dp_vs_maxK_series = np.full(len(df_day_feat), np.nan, dtype=float)
-    p_by_day: Dict[pd.Timestamp, float] = {}
+    p_by_day = {}
 
-    def maybe_train():
+    bandit_vec = None
+    bandit = None
+    daily_bandit_log = []
+
+    engine = ExecutionEngine(initial_capital=initial_capital, fee_pct=fee_pct)
+    bsp_rows_5m = []
+    seen_keys_5m = set()
+    buy_pack = None
+    sell_pack = None
+    last_train_day = None
+
+    if threshold_ret_grid is None:
+        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.05)
+    buy_ret_th_live = 0.30
+    sell_ret_th_live = 0.30
+
+    daily_i_start = 0
+    five_i_start = 0
+    current_day = None
+    daily_log = []
+
+    # ----------------------------
+    # Resume restore
+    # ----------------------------
+    if resume_from_checkpoint_path is not None and os.path.exists(resume_from_checkpoint_path):
+        B = load_checkpoint_bundle(resume_from_checkpoint_path)
+        if verbose:
+            print(f"[RESUME] loading checkpoint: {resume_from_checkpoint_path} @ {B.get('checkpoint_time')}")
+
+        st.model = B.get("daily_prob_model", None)
+        st.trained_n = int(B.get("daily_prob_trained_n", 0))
+        st.new_labels = 0
+
+        X_days = B.get("X_days", []) or []
+        y_days = B.get("y_days", []) or []
+        pending_idx = B.get("pending_idx", []) or []
+
+        p_series_loaded = B.get("p_series", None)
+        if p_series_loaded is not None and len(p_series_loaded) == len(p_series):
+            p_series = np.asarray(p_series_loaded, dtype=float)
+
+        dp_min_loaded = B.get("dp_vs_minK_series", None)
+        dp_max_loaded = B.get("dp_vs_maxK_series", None)
+        if dp_min_loaded is not None and len(dp_min_loaded) == len(dp_vs_minK_series):
+            dp_vs_minK_series = np.asarray(dp_min_loaded, dtype=float)
+        if dp_max_loaded is not None and len(dp_max_loaded) == len(dp_vs_maxK_series):
+            dp_vs_maxK_series = np.asarray(dp_max_loaded, dtype=float)
+
+        p_by_day_str = B.get("p_by_day_str", {}) or {}
+        p_by_day = {pd.to_datetime(k).normalize(): float(v) for k, v in p_by_day_str.items()}
+
+        bsp_rows_daily = B.get("bsp_rows_daily", []) or []
+        seen_bsp_daily = _safe_list_to_set(B.get("seen_bsp_daily_list", []))
+
+        bandit_vec = B.get("bandit_vec", None)
+        bandit_state = B.get("bandit_state", None)
+        if bandit_state is not None:
+            bandit = LinUCBBandit.from_state_dict(bandit_state)
+        daily_bandit_log = B.get("daily_bandit_log", []) or []
+
+        buy_pack = unpack_ret_modelpack_from_load(B.get("buy_pack", None))
+        sell_pack = unpack_ret_modelpack_from_load(B.get("sell_pack", None))
+        buy_ret_th_live = float(B.get("buy_ret_th_live", buy_ret_th_live))
+        sell_ret_th_live = float(B.get("sell_ret_th_live", sell_ret_th_live))
+
+        bsp_rows_5m = B.get("bsp_rows_5m", []) or []
+        seen_keys_5m = _safe_list_to_set(B.get("seen_keys_5m_list", []))
+
+        engine.load_state_dict(B.get("engine_state", {}) or {})
+        daily_log = B.get("daily_log", []) or []
+
+        daily_i_start = int(B.get("daily_i_last", -1)) + 1
+        five_i_start = int(B.get("five_i_last", -1)) + 1
+
+        cur_day_s = B.get("current_day", None)
+        current_day = None if cur_day_s is None else datetime.date.fromisoformat(cur_day_s)
+
+        warm_day = B.get("warmup_daily_bars", None)
+        if warm_day is not None and len(warm_day):
+            for _, rr in warm_day.iterrows():
+                ts = pd.to_datetime(rr["timestamp"])
+                daily_chan.process_new_kline(build_klu(ts, rr["_open"], rr["_high"], rr["_low"], rr["_close"], rr.get("_vol", 0.0)))
+
+        warm_5m = B.get("warmup_5m_bars", None)
+        if warm_5m is not None and len(warm_5m):
+            for _, rr in warm_5m.iterrows():
+                ts = pd.to_datetime(rr["timestamp"])
+                feed_chan_one(chan_5m, build_klu(ts, rr["_open"], rr["_high"], rr["_low"], rr["_close"], rr.get("_vol", 0.0)))
+
+        if verbose:
+            print(f"[RESUME] daily_i_start={daily_i_start} / {len(df_day_feat)}")
+            print(f"[RESUME] five_i_start={five_i_start} / {len(df_5m_idx)}")
+            print(f"[RESUME] daily_model={'YES' if st.model is not None else 'NO'} "
+                  f"bandit={'YES' if bandit is not None else 'NO'} "
+                  f"5m_buy={'YES' if buy_pack else 'NO'} 5m_sell={'YES' if sell_pack else 'NO'}")
+
+    # ----------------------------
+    # Daily trainer helper
+    # ----------------------------
+    def maybe_train_daily():
         if len(y_days) < int(min_labeled_days_to_train):
             return
         if st.model is None or st.new_labels >= int(retrain_every_new_labels):
@@ -1049,7 +1522,72 @@ def run_daily_prob_then_5m_xgb_gated(
                 if verbose:
                     print(f"[TRAIN][DAILY-PROB] skipped: {e}")
 
-    for i in range(len(df_day_feat)):
+    # ----------------------------
+    # Save checkpoint helper
+    # ----------------------------
+    def save_checkpoint(now_ts: pd.Timestamp, daily_i_last: int, five_i_last: int, current_day):
+        if save_checkpoint_path is None:
+            return
+
+        warm_daily = df_day_raw[df_day_raw["timestamp"] <= now_ts].tail(int(daily_chan_max_klines)).copy()
+        warm_5m = df_5m_raw[df_5m_raw["timestamp"] <= now_ts].tail(int(five_chan_max_klines)).copy()
+
+        bundle = build_checkpoint_bundle(
+            code=code,
+            checkpoint_time=str(now_ts),
+
+            original_daily_chan_start=str(daily_chan_start),
+            original_accumulation_start=str(accumulation_start),
+            original_sim_start=str(sim_start),
+            original_end_time=str(end_time),
+
+            macro_files=macro_files,
+
+            daily_prob_model=st.model,
+            daily_prob_trained_n=st.trained_n,
+            X_days=X_days,
+            y_days=y_days,
+            pending_idx=pending_idx,
+            p_by_day=p_by_day,
+            p_series=p_series,
+            dp_vs_minK_series=dp_vs_minK_series,
+            dp_vs_maxK_series=dp_vs_maxK_series,
+            bsp_rows_daily=bsp_rows_daily,
+            seen_bsp_daily=seen_bsp_daily,
+
+            bandit_vec=bandit_vec,
+            bandit_state=None if bandit is None else bandit.state_dict(),
+            daily_bandit_log=daily_bandit_log,
+
+            buy_pack=buy_pack,
+            sell_pack=sell_pack,
+            buy_ret_th_live=buy_ret_th_live,
+            sell_ret_th_live=sell_ret_th_live,
+
+            bsp_rows_5m=bsp_rows_5m,
+            seen_keys_5m=seen_keys_5m,
+
+            engine_state=engine.state_dict(),
+            daily_log=daily_log,
+
+            daily_i_last=daily_i_last,
+            five_i_last=five_i_last,
+            current_day=current_day,
+
+            warmup_daily_bars=warm_daily[["timestamp","_open","_high","_low","_close","_vol"]].reset_index(drop=True),
+            warmup_5m_bars=warm_5m[["timestamp","_open","_high","_low","_close","_vol"]].reset_index(drop=True),
+
+            daily_chan_max_klines=daily_chan_max_klines,
+            five_chan_max_klines=five_chan_max_klines,
+        )
+        save_joblib(save_checkpoint_path, bundle)
+        if verbose:
+            print(f"[CHECKPOINT] saved -> {save_checkpoint_path} @ {now_ts}")
+
+    # ----------------------------
+    # DAILY PHASE
+    # ----------------------------
+    for i in range(daily_i_start, len(df_day_feat)):
         r = df_day_feat.loc[i]
         ts = pd.to_datetime(r["timestamp"])
         day = ts.normalize()
@@ -1071,7 +1609,6 @@ def run_daily_prob_then_5m_xgb_gated(
         regime = regime_for_day_from_ends(day, ends)
         base_dir_today = latest_bsp_dir_up_to(bsp_rows_daily, ts)
 
-        # predict p_day if model exists
         p_val = np.nan
         if st.model is not None:
             bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts]
@@ -1083,12 +1620,12 @@ def run_daily_prob_then_5m_xgb_gated(
                 dp_maxK=0.0,
                 regime=regime,
                 base_dir=base_dir_today,
+                macro_cols=macro_cols,
             )
             p_val = float(predict_prob(st.model, [feat_i])[0])
             p_series[i] = p_val
             p_by_day[day] = p_val
 
-        # dp vs min/max prev K
         lb = int(dp_lookback)
         p_minK = np.nan
         p_maxK = np.nan
@@ -1104,7 +1641,6 @@ def run_daily_prob_then_5m_xgb_gated(
         dp_vs_minK_series[i] = dp_vs_minK
         dp_vs_maxK_series[i] = dp_vs_maxK
 
-        # finalize labels for older days
         pending_idx.append(i)
         while pending_idx and i >= pending_idx[0] + int(N_confirm):
             j = pending_idx.pop(0)
@@ -1129,20 +1665,14 @@ def run_daily_prob_then_5m_xgb_gated(
                 dp_maxK=float(dp_vs_maxK_series[j]) if np.isfinite(dp_vs_maxK_series[j]) else 0.0,
                 regime=regime_j,
                 base_dir=base_dir_j,
+                macro_cols=macro_cols,
             )
 
             X_days.append(feat_j)
             y_days.append(int(y))
             st.new_labels += 1
 
-        maybe_train()
-
-    if verbose:
-        y = np.asarray(y_days, dtype=int) if len(y_days) else np.array([], dtype=int)
-        if len(y):
-            print(f"[LABELS][DAILY-PROB] n={len(y)} pos={int(y.sum())} ({y.mean():.2%})")
-        print(f"[MODEL][DAILY-PROB] trained={'yes' if st.model is not None else 'no'} trained_n={st.trained_n}")
-        print(f"[BSP][DAILY] total={len(bsp_rows_daily)}")
+        maybe_train_daily()
 
     feat_imp_path = os.path.join(output_dir, "daily_lr_feature_importance.csv")
     if st.model is not None:
@@ -1155,32 +1685,53 @@ def run_daily_prob_then_5m_xgb_gated(
             if verbose:
                 print(f"[IMP][DAILY-PROB] skipped: {e}")
 
-    # =========================================================
-    # PHASE 2/3: 5m accumulation + trading with daily gate
-    # =========================================================
-    print(f"[PHASE2/3] 5m feed begins at accumulation_start={acc_s.date()}, trading starts at sim_s={sim_s.date()}")
+    # ----------------------------
+    # Build bandit vectorizer
+    # ----------------------------
+    if bandit_vec is None:
+        vec_fit_list = []
+        for i in range(len(df_day_feat)):
+            r = df_day_feat.loc[i]
+            ts = pd.to_datetime(r["timestamp"])
+            day = ts.normalize()
 
-    engine = ExecutionEngine(initial_capital=initial_capital, fee_pct=fee_pct)
+            ends = compute_chain_endpoints([b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts])
+            regime = regime_for_day_from_ends(day, ends)
+            base_dir = latest_bsp_dir_up_to(bsp_rows_daily, ts)
+            bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts]
 
-    bsp_rows_5m: List[Dict[str, Any]] = []
-    seen_keys_5m = set()
+            dummy = make_bandit_state_from_daily_row(
+                kline_row=r,
+                bsp_hist_up_to_day=bsp_hist,
+                p_val=float(p_series[i]) if np.isfinite(p_series[i]) else 0.5,
+                dp_minK=float(dp_vs_minK_series[i]) if np.isfinite(dp_vs_minK_series[i]) else 0.0,
+                dp_maxK=float(dp_vs_maxK_series[i]) if np.isfinite(dp_vs_maxK_series[i]) else 0.0,
+                regime=regime,
+                base_dir=base_dir,
+                macro_cols=macro_cols,
+                current_pos=0,
+                current_gate="FREE",
+                equity_rel=1.0,
+                dd_rel=0.0,
+            )
+            vec_fit_list.append(dummy)
 
-    buy_pack: Optional[RetModelPack] = None
-    sell_pack: Optional[RetModelPack] = None
-    last_train_day: Optional[pd.Timestamp] = None
+        bandit_vec = DictVectorizer(sparse=False)
+        bandit_vec.fit(vec_fit_list)
 
-    if threshold_ret_grid is None:
-        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.05)
-    buy_ret_th_live = 0.30
-    sell_ret_th_live = 0.30
+    if bandit is None:
+        bandit = LinUCBBandit(
+            n_actions=3,
+            n_features=len(bandit_vec.feature_names_),
+            alpha=bandit_alpha,
+            l2=bandit_l2,
+        )
 
-    current_day: Optional[datetime.date] = None
-    day_gate: str = "NO_P"
-    must_trade_dir: Optional[str] = None
-    allow_buy: bool = True
-    allow_sell: bool = True
-
-    daily_log = []
+    # ----------------------------
+    # 5M PHASE
+    # ----------------------------
+    if verbose:
+        print(f"[PHASE2/3] 5m feed begins at accumulation_start={acc_s.date()}, trading starts at sim_s={sim_s.date()}")
 
     def maybe_retrain_5m(day_ts: pd.Timestamp):
         nonlocal buy_pack, sell_pack, last_train_day
@@ -1223,19 +1774,105 @@ def run_daily_prob_then_5m_xgb_gated(
             if verbose:
                 print(f"[TH-OPT][GLOBAL] asof_bar={asof_bar_idx} buy_th={buy_ret_th_live:.2f} sell_th={sell_ret_th_live:.2f}")
 
+    # build daily action map using bandit
+    daily_action_map = {}
+    day_index_map = {pd.to_datetime(df_day_feat.loc[i, "timestamp"]).normalize(): i for i in range(len(df_day_feat))}
+
+    equity_peak = initial_capital
+    cur_gate_name = "FREE"
+    cur_pos_for_bandit = 1 if True else 0
+
+    # estimate position state for bandit from execution engine initial state
+    cur_pos_for_bandit = engine.pos
+    est_equity = initial_capital if engine.pos == 0 else initial_capital
+
+    sorted_days = sorted(day_index_map.keys())
+    for day in sorted_days:
+        i_day = day_index_map[day]
+        r = df_day_feat.loc[i_day]
+        ts = pd.to_datetime(r["timestamp"])
+
+        bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts]
+        ends = compute_chain_endpoints(bsp_hist)
+        regime = regime_for_day_from_ends(day, ends)
+        base_dir = latest_bsp_dir_up_to(bsp_hist, ts)
+
+        p_day_val = float(p_series[i_day]) if np.isfinite(p_series[i_day]) else 0.5
+        dp_min = float(dp_vs_minK_series[i_day]) if np.isfinite(dp_vs_minK_series[i_day]) else 0.0
+        dp_max = float(dp_vs_maxK_series[i_day]) if np.isfinite(dp_vs_maxK_series[i_day]) else 0.0
+
+        dd_rel = 0.0 if equity_peak <= 0 else max(0.0, (equity_peak - est_equity) / equity_peak)
+        state_dict = make_bandit_state_from_daily_row(
+            kline_row=r,
+            bsp_hist_up_to_day=bsp_hist,
+            p_val=p_day_val,
+            dp_minK=dp_min,
+            dp_maxK=dp_max,
+            regime=regime,
+            base_dir=base_dir,
+            macro_cols=macro_cols,
+            current_pos=cur_pos_for_bandit,
+            current_gate=cur_gate_name,
+            equity_rel=est_equity / max(initial_capital, 1e-12),
+            dd_rel=dd_rel,
+        )
+        x = bandit_vec.transform([state_dict])[0]
+        action = bandit.select_action(x)
+        action_name = ACTION_TO_NAME[action]
+
+        daily_action_map[day] = {
+            "action": action_name,
+            "x": x,
+            "i_day": i_day,
+            "p_day": p_day_val,
+        }
+
+        # simple reward proxy at daily layer for online bandit update
+        # uses next daily open-close return, while true realized strategy reward will still come through full engine
+        if i_day + 1 < len(df_day_feat):
+            next_open = float(df_day_feat.loc[i_day + 1, "_open"])
+            next_close = float(df_day_feat.loc[i_day + 1, "_close"])
+            gross_ret = (next_close / max(next_open, 1e-12)) - 1.0
+            if action_name == "FORCE_BUY":
+                rwd = gross_ret
+                cur_pos_for_bandit = 1
+            elif action_name == "FORCE_SELL":
+                rwd = 0.0
+                cur_pos_for_bandit = 0
+            else:
+                rwd = 0.5 * gross_ret
+            bandit.update(action, x, rwd)
+
+            if action_name == "FORCE_BUY":
+                est_equity *= (1.0 + gross_ret)
+            elif action_name == "FREE":
+                est_equity *= (1.0 + 0.5 * gross_ret)
+            equity_peak = max(equity_peak, est_equity)
+            cur_gate_name = action_name
+
+        daily_bandit_log.append({
+            "date": day,
+            "action": action_name,
+            "p_day": p_day_val,
+        })
+
     sim_start_ts = pd.to_datetime(sim_start)
     last_day_end_idx = None
+    day_gate = "FREE"
+    must_trade_dir = None
+    allow_buy = True
+    allow_sell = True
+    days_since_checkpoint = 0
 
-    for i in range(len(df_5m_idx)):
+    for i in range(five_i_start, len(df_5m_idx)):
         bar_ts = pd.to_datetime(df_5m_idx.loc[i, "timestamp"])
-        bar_day = bar_ts.date()
+        bar_day = bar_ts.normalize()
         in_sim = (bar_ts >= sim_start_ts)
 
         if current_day is None:
-            current_day = bar_day
-
-            p_day = p_by_day.get(pd.to_datetime(bar_day), np.nan)
-            day_gate = gate_from_p(p_day, p_sell_level, p_buy_level)
+            current_day = bar_day.date()
+            action_info = daily_action_map.get(bar_day, {"action": "FREE", "p_day": np.nan})
+            day_gate = action_info["action"]
 
             allow_buy = True
             allow_sell = True
@@ -1250,12 +1887,7 @@ def run_daily_prob_then_5m_xgb_gated(
                 if engine.pos == 1:
                     must_trade_dir = "sell"
 
-            if verbose:
-                prob_str = "nan" if not np.isfinite(p_day) else f"{p_day:.3f}"
-                print(f"[DAY INIT] {bar_day} prob={prob_str} gate={day_gate} must={must_trade_dir} "
-                      f"| th_buy={buy_ret_th_live:.2f} th_sell={sell_ret_th_live:.2f}")
-
-        if bar_day != current_day:
+        if bar_day.date() != current_day:
             prev_day = current_day
             prev_day_ts = pd.to_datetime(prev_day)
 
@@ -1273,18 +1905,30 @@ def run_daily_prob_then_5m_xgb_gated(
 
             day_close = day_close_map.get(prev_day)
             equity = engine.mark_to_market(day_close) if day_close is not None else engine.cash
-            daily_log.append({"date": prev_day, "equity": equity, "cash": engine.cash, "pos": engine.pos,
-                              "buy_th": buy_ret_th_live, "sell_th": sell_ret_th_live})
+            daily_log.append({
+                "date": prev_day,
+                "equity": equity,
+                "cash": engine.cash,
+                "pos": engine.pos,
+                "buy_th": buy_ret_th_live,
+                "sell_th": sell_ret_th_live,
+                "p_day": float(daily_action_map.get(pd.to_datetime(prev_day), {}).get("p_day", np.nan)),
+                "daily_action": daily_action_map.get(pd.to_datetime(prev_day), {}).get("action", "FREE"),
+            })
 
-            if verbose:
-                tag = "SIM" if (pd.to_datetime(prev_day) >= sim_start_ts.normalize()) else "ACCUM"
-                print(f"[EOD-{tag}] {prev_day} equity={equity:.2f} cash={engine.cash:.2f} pos={engine.pos} "
-                      f"| next_day={bar_day} (thresholds kept/updated)")
+            days_since_checkpoint += 1
+            if save_checkpoint_path is not None and days_since_checkpoint >= int(checkpoint_every_n_days):
+                save_checkpoint(
+                    now_ts=pd.to_datetime(df_5m_idx.loc[last_day_end_idx, "timestamp"]),
+                    daily_i_last=(len(df_day_feat) - 1),
+                    five_i_last=int(last_day_end_idx),
+                    current_day=prev_day,
+                )
+                days_since_checkpoint = 0
 
-            current_day = bar_day
-
-            p_day = p_by_day.get(pd.to_datetime(bar_day), np.nan)
-            day_gate = gate_from_p(p_day, p_sell_level, p_buy_level)
+            current_day = bar_day.date()
+            action_info = daily_action_map.get(bar_day, {"action": "FREE", "p_day": np.nan})
+            day_gate = action_info["action"]
 
             allow_buy = True
             allow_sell = True
@@ -1298,11 +1942,6 @@ def run_daily_prob_then_5m_xgb_gated(
                 allow_buy = False
                 if engine.pos == 1:
                     must_trade_dir = "sell"
-
-            if verbose:
-                prob_str = "nan" if not np.isfinite(p_day) else f"{p_day:.3f}"
-                print(f"[DAY INIT] {bar_day} prob={prob_str} gate={day_gate} must={must_trade_dir} "
-                      f"| th_buy={buy_ret_th_live:.2f} th_sell={sell_ret_th_live:.2f}")
 
         last_day_end_idx = i
 
@@ -1333,10 +1972,9 @@ def run_daily_prob_then_5m_xgb_gated(
             r["direction"] = str(r["direction"]).lower()
             if "bsp_type" in r and r["bsp_type"] is not None:
                 r["bsp_type"] = str(r["bsp_type"]).lower()
-
             r.setdefault("best_return_pct", np.nan)
 
-            k = (int(r.get("klu_idx",-1)), str(r.get("direction")), str(r.get("bsp_type")))
+            k = (int(r.get("klu_idx", -1)), str(r.get("direction")), str(r.get("bsp_type")))
             if k in seen_keys_5m:
                 continue
             seen_keys_5m.add(k)
@@ -1345,14 +1983,13 @@ def run_daily_prob_then_5m_xgb_gated(
             if not in_sim:
                 continue
 
-            d = str(r.get("direction","buy")).lower()
+            d = str(r.get("direction", "buy")).lower()
             ki = int(r.get("klu_idx", i))
 
             if d == "buy" and not allow_buy:
                 continue
             if d == "sell" and not allow_sell:
                 continue
-
             if must_trade_dir is not None and d != must_trade_dir:
                 continue
 
@@ -1362,14 +1999,18 @@ def run_daily_prob_then_5m_xgb_gated(
                     if cc not in row_df.columns:
                         row_df[cc] = 0.0
                 pr = predict_ret(buy_pack, row_df)
-
                 if pr >= float(buy_ret_th_live):
                     engine.place_order_for_next_bar(
                         side="buy",
                         seen_idx=ki,
-                        reason=("FORCE_BUY->first acceptable 5m signal" if day_gate=="FORCE_BUY" else "5m BUY signal"),
-                        meta={"ts": str(bar_ts), "p_day": float(p_by_day.get(pd.to_datetime(bar_day), np.nan)),
-                              "pred": float(pr), "th": float(buy_ret_th_live), "gate": day_gate}
+                        reason=("BANDIT_FORCE_BUY->first acceptable 5m signal" if day_gate == "FORCE_BUY" else "5m BUY signal"),
+                        meta={
+                            "ts": str(bar_ts),
+                            "p_day": float(daily_action_map.get(bar_day, {}).get("p_day", np.nan)),
+                            "pred": float(pr),
+                            "th": float(buy_ret_th_live),
+                            "gate": day_gate,
+                        },
                     )
                     if must_trade_dir == "buy":
                         must_trade_dir = None
@@ -1380,14 +2021,18 @@ def run_daily_prob_then_5m_xgb_gated(
                     if cc not in row_df.columns:
                         row_df[cc] = 0.0
                 pr = predict_ret(sell_pack, row_df)
-
                 if pr >= float(sell_ret_th_live):
                     engine.place_order_for_next_bar(
                         side="sell",
                         seen_idx=ki,
-                        reason=("FORCE_SELL->first acceptable 5m signal" if day_gate=="FORCE_SELL" else "5m SELL signal"),
-                        meta={"ts": str(bar_ts), "p_day": float(p_by_day.get(pd.to_datetime(bar_day), np.nan)),
-                              "pred": float(pr), "th": float(sell_ret_th_live), "gate": day_gate}
+                        reason=("BANDIT_FORCE_SELL->first acceptable 5m signal" if day_gate == "FORCE_SELL" else "5m SELL signal"),
+                        meta={
+                            "ts": str(bar_ts),
+                            "p_day": float(daily_action_map.get(bar_day, {}).get("p_day", np.nan)),
+                            "pred": float(pr),
+                            "th": float(sell_ret_th_live),
+                            "gate": day_gate,
+                        },
                     )
                     if must_trade_dir == "sell":
                         must_trade_dir = None
@@ -1395,27 +2040,54 @@ def run_daily_prob_then_5m_xgb_gated(
     if current_day is not None:
         day_close = day_close_map.get(current_day)
         equity = engine.mark_to_market(day_close) if day_close is not None else engine.cash
-        daily_log.append({"date": current_day, "equity": equity, "cash": engine.cash, "pos": engine.pos,
-                          "buy_th": buy_ret_th_live, "sell_th": sell_ret_th_live})
+        daily_log.append({
+            "date": current_day,
+            "equity": equity,
+            "cash": engine.cash,
+            "pos": engine.pos,
+            "buy_th": buy_ret_th_live,
+            "sell_th": sell_ret_th_live,
+            "p_day": float(daily_action_map.get(pd.to_datetime(current_day), {}).get("p_day", np.nan)),
+            "daily_action": daily_action_map.get(pd.to_datetime(current_day), {}).get("action", "FREE"),
+        })
 
+    if save_checkpoint_path is not None and len(df_5m_idx) > 0:
+        final_ts = pd.to_datetime(df_5m_idx.loc[len(df_5m_idx)-1, "timestamp"])
+        save_checkpoint(
+            now_ts=final_ts,
+            daily_i_last=(len(df_day_feat) - 1),
+            five_i_last=(len(df_5m_idx) - 1),
+            current_day=current_day,
+        )
+
+    # ----------------------------
+    # Save outputs
+    # ----------------------------
     trades_df = pd.DataFrame(engine.trades)
     daily_df = pd.DataFrame(daily_log)
     if not daily_df.empty:
-        daily_df["date"] = pd.to_datetime(daily_df["date"])
-        daily_df = daily_df.sort_values("date").reset_index(drop=True)
+        if "date" in daily_df.columns:
+            daily_df["date"] = pd.to_datetime(daily_df["date"])
+            daily_df = daily_df.sort_values("date").reset_index(drop=True)
+
+    bandit_daily_df = pd.DataFrame(daily_bandit_log)
+    if not bandit_daily_df.empty:
+        bandit_daily_df["date"] = pd.to_datetime(bandit_daily_df["date"])
 
     trades_csv = os.path.join(output_dir, "trades.csv")
     daily_csv = os.path.join(output_dir, "daily_log.csv")
+    bandit_csv = os.path.join(output_dir, "daily_bandit_actions.csv")
+
     trades_df.to_csv(trades_csv, index=False)
     daily_df.to_csv(daily_csv, index=False)
+    bandit_daily_df.to_csv(bandit_csv, index=False)
 
-    # Plots
     out_eq = os.path.join(output_dir, "equity_vs_buyhold.png")
     out_px = os.path.join(output_dir, "price_with_trades.png")
     out_p  = os.path.join(output_dir, "p_day.png")
 
     plt.figure()
-    if not daily_df.empty:
+    if not daily_df.empty and "date" in daily_df.columns and "equity" in daily_df.columns:
         plt.plot(daily_df["date"], daily_df["equity"], label="Strategy Equity")
     if len(buy_hold) > 0:
         plt.plot(buy_hold.index, buy_hold.values, label="Buy&Hold")
@@ -1428,13 +2100,13 @@ def run_daily_prob_then_5m_xgb_gated(
 
     plt.figure()
     plt.plot(df_5m_idx["timestamp"], df_5m_idx["Close"], label="5m Close")
-    if not trades_df.empty:
+    if not trades_df.empty and "seen_idx" in trades_df.columns and "exec_px" in trades_df.columns:
         for _, tr in trades_df.iterrows():
             idx = int(tr["seen_idx"])
-            if 0 <= idx < len(df_5m_idx):
+            if idx in df_5m_idx.index:
                 t = pd.to_datetime(df_5m_idx.loc[idx, "timestamp"])
                 px = float(tr["exec_px"])
-                if tr.get("side","") == "buy":
+                if tr.get("side", "") == "buy":
                     plt.scatter([t], [px], marker="^")
                 else:
                     plt.scatter([t], [px], marker="v")
@@ -1450,8 +2122,6 @@ def run_daily_prob_then_5m_xgb_gated(
         xs = pd.to_datetime(days_sorted)
         ys = [p_by_day[d] for d in days_sorted]
         plt.plot(xs, ys, label="p_day")
-        plt.axhline(p_sell_level, linestyle="--", label="p_sell_level")
-        plt.axhline(p_buy_level, linestyle="--", label="p_buy_level")
         plt.legend()
         plt.title("Daily Probability p_day")
         plt.xlabel("Date")
@@ -1462,6 +2132,7 @@ def run_daily_prob_then_5m_xgb_gated(
     if verbose:
         print(f"[SAVED] {trades_csv}")
         print(f"[SAVED] {daily_csv}")
+        print(f"[SAVED] {bandit_csv}")
         print(f"[SAVED] {out_eq}")
         print(f"[SAVED] {out_px}")
         if days_sorted:
@@ -1469,24 +2140,22 @@ def run_daily_prob_then_5m_xgb_gated(
         if st.model is not None:
             print(f"[SAVED] {feat_imp_path}")
         print(f"[TRADES] total={len(trades_df)}")
-        if not trades_df.empty:
-            ts0 = pd.to_datetime(df_5m_idx.loc[int(trades_df["seen_idx"].min()), "timestamp"])
-            print(f"[TRADES] first_trade_ts={ts0} (sim_start={sim_start_ts})")
 
     return {
         "trades_df": trades_df,
         "daily_log_df": daily_df,
+        "daily_bandit_df": bandit_daily_df,
         "p_by_day": p_by_day,
         "buy_hold": buy_hold,
         "output_dir": output_dir,
+        "checkpoint_path": save_checkpoint_path,
     }
 
 
 # ============================================================
-# RUN
+# EXAMPLE RUN
 # ============================================================
-
-res = run_daily_prob_then_5m_xgb_gated(
+res = run_daily_bandit_then_5m_xgb(
     daily_csv_path="DataAPI/data/QQQ_DAY.csv",
     k5m_csv_path="DataAPI/data/QQQ_5M.csv",
     code="QQQ",
@@ -1494,15 +2163,15 @@ res = run_daily_prob_then_5m_xgb_gated(
     daily_chan_start="2014-06-01",
     accumulation_start="2016-10-01",
     sim_start="2019-01-01",
-    end_time="2025-12-31",
+    end_time="2026-12-31",
 
     N_confirm=5,
     min_labeled_days_to_train=200,
     retrain_every_new_labels=25,
     dp_lookback=5,
 
-    p_sell_level=0.30,
-    p_buy_level=0.20,
+    bandit_alpha=0.75,
+    bandit_l2=1.0,
 
     lookahead_days_5m=2.0,
     retrain_every_days_5m=5,
@@ -1518,10 +2187,32 @@ res = run_daily_prob_then_5m_xgb_gated(
     daily_chan_max_klines=500,
     five_chan_max_klines=500,
 
-    output_dir="output_dailyprob_gated_5m_xgb_QQQ_2025_new",
-    verbose=True,
-)
+    macro_files={
+        "vix_":   "VIX.csv",
+        "dxy_":   "DXY.csv",
+        "us5y_":  "US5Y.csv",
+        "us10y_": "US10Y.csv",
+        "us30y_": "US30Y.csv",
+        "xau_":   "XAU.csv",
+        "nyxbt_": "NYXBT.csv",
+        "10y2ys_": "10Y2YS.csv",
+        "us2y_": "US2Y.csv",
+        "spgsci_": "SPGSCI.csv",
+        "spy_": "SPY_DAY.csv",
+        "qqq_": "QQQ_DAY.csv",
+        "rut_": "RUT.csv",
+        "vvix_": "VVIX.csv",
+        "vix3m_": "VIX3M.csv",
+        "vxn_": "VXN.csv",
+        "rvx_": "RVX.csv",
+        "ixic_": "IXIC.csv",
+        "ndx_": "NDX.csv",
+        "dji_": "DJI.csv",
+    },
 
-display(res["trades_df"].head(50))
-display(res["trades_df"].tail(50))
-display(res["daily_log_df"].tail(20))
+    output_dir="output_daily_bandit_5m_xgb_QQQ",
+    verbose=True,
+
+    save_checkpoint_path="checkpoints/QQQ_daily_bandit_5m_checkpoint.joblib",
+    checkpoint_every_n_days=5,
+)
