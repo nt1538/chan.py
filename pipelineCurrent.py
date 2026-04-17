@@ -2152,67 +2152,68 @@ def run_daily_bandit_then_5m_xgb(
     }
 
 
-# ============================================================
-# EXAMPLE RUN
-# ============================================================
-res = run_daily_bandit_then_5m_xgb(
-    daily_csv_path="DataAPI/data/QQQ_DAY.csv",
-    k5m_csv_path="DataAPI/data/QQQ_5M.csv",
-    code="QQQ",
+if __name__ == "__main__":
+    # ============================================================
+    # EXAMPLE RUN
+    # ============================================================
+    res = run_daily_bandit_then_5m_xgb(
+        daily_csv_path="DataAPI/data/QQQ_DAY.csv",
+        k5m_csv_path="DataAPI/data/QQQ_5M.csv",
+        code="QQQ",
 
-    daily_chan_start="2014-06-01",
-    accumulation_start="2016-10-01",
-    sim_start="2019-01-01",
-    end_time="2026-12-31",
+        daily_chan_start="2014-06-01",
+        accumulation_start="2016-10-01",
+        sim_start="2019-01-01",
+        end_time="2026-12-31",
 
-    N_confirm=5,
-    min_labeled_days_to_train=200,
-    retrain_every_new_labels=25,
-    dp_lookback=5,
+        N_confirm=5,
+        min_labeled_days_to_train=200,
+        retrain_every_new_labels=25,
+        dp_lookback=5,
 
-    bandit_alpha=0.75,
-    bandit_l2=1.0,
+        bandit_alpha=0.75,
+        bandit_l2=1.0,
 
-    lookahead_days_5m=2.0,
-    retrain_every_days_5m=5,
-    min_samples_total_5m=300,
+        lookahead_days_5m=2.0,
+        retrain_every_days_5m=5,
+        min_samples_total_5m=300,
 
-    threshold_window_days=2.0,
-    threshold_ret_grid=None,
-    threshold_min_open_signals=10,
+        threshold_window_days=2.0,
+        threshold_ret_grid=None,
+        threshold_min_open_signals=10,
 
-    initial_capital=100000.0,
-    fee_pct=0.0,
+        initial_capital=100000.0,
+        fee_pct=0.0,
 
-    daily_chan_max_klines=500,
-    five_chan_max_klines=500,
+        daily_chan_max_klines=500,
+        five_chan_max_klines=500,
 
-    macro_files={
-        "vix_":   "VIX.csv",
-        "dxy_":   "DXY.csv",
-        "us5y_":  "US5Y.csv",
-        "us10y_": "US10Y.csv",
-        "us30y_": "US30Y.csv",
-        "xau_":   "XAU.csv",
-        "nyxbt_": "NYXBT.csv",
-        "10y2ys_": "10Y2YS.csv",
-        "us2y_": "US2Y.csv",
-        "spgsci_": "SPGSCI.csv",
-        "spy_": "SPY_DAY.csv",
-        "qqq_": "QQQ_DAY.csv",
-        "rut_": "RUT.csv",
-        "vvix_": "VVIX.csv",
-        "vix3m_": "VIX3M.csv",
-        "vxn_": "VXN.csv",
-        "rvx_": "RVX.csv",
-        "ixic_": "IXIC.csv",
-        "ndx_": "NDX.csv",
-        "dji_": "DJI.csv",
-    },
+        macro_files={
+            "vix_":   "VIX.csv",
+            "dxy_":   "DXY.csv",
+            "us5y_":  "US5Y.csv",
+            "us10y_": "US10Y.csv",
+            "us30y_": "US30Y.csv",
+            "xau_":   "XAU.csv",
+            "nyxbt_": "NYXBT.csv",
+            "10y2ys_": "10Y2YS.csv",
+            "us2y_": "US2Y.csv",
+            "spgsci_": "SPGSCI.csv",
+            "spy_": "SPY_DAY.csv",
+            "qqq_": "QQQ_DAY.csv",
+            "rut_": "RUT.csv",
+            "vvix_": "VVIX.csv",
+            "vix3m_": "VIX3M.csv",
+            "vxn_": "VXN.csv",
+            "rvx_": "RVX.csv",
+            "ixic_": "IXIC.csv",
+            "ndx_": "NDX.csv",
+            "dji_": "DJI.csv",
+        },
 
-    output_dir="output_daily_bandit_5m_xgb_QQQ",
-    verbose=True,
+        output_dir="output_daily_bandit_5m_xgb_QQQ",
+        verbose=True,
 
-    save_checkpoint_path="checkpoints/QQQ_daily_bandit_5m_checkpoint.joblib",
-    checkpoint_every_n_days=5,
-)
+        save_checkpoint_path="checkpoints/QQQ_daily_bandit_5m_checkpoint.joblib",
+        checkpoint_every_n_days=5,
+    )

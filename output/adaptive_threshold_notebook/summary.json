@@ -1,0 +1,6 @@
+{
+  "selected_daily_log": "c:\\Users\\TonyTang\\Documents\\chan.py\\output_dailyprob_gated_5m_xgb_SPY_Macros_2016-2024Cumulative\\daily_log.csv",
+  "latest_adaptive_buy_level": 0.31,
+  "latest_adaptive_sell_level": 0.33,
+  "latest_adaptive_gate": "FORCE_BUY"
+}

@@ -1,0 +1,9 @@
+{
+  "source_daily_bandit_log": "c:\\Users\\TonyTang\\Documents\\chan.py\\output_QQQ_realtime_exact_2008_2017\\daily_bandit_log.csv",
+  "initial_equity": 100000.0,
+  "static_final_equity": 276730.680020971,
+  "adaptive_reward_final_equity": 335927.6540190746,
+  "adaptive_accuracy_final_equity": 379686.6796084934,
+  "bandit_final_equity": 313816.212173054,
+  "oracle_final_equity": 7232389.256482533
+}

@@ -1,0 +1,46 @@
+{
+  "policies": [
+    "static",
+    "adaptive_reward",
+    "adaptive_accuracy",
+    "threshold_pair_bandit"
+  ],
+  "summary_rows": [
+    {
+      "policy": "adaptive_reward",
+      "final_equity": 298886.4371867189,
+      "reward_days": 1886,
+      "num_trades": 416,
+      "avg_chosen_reward": 0.000479251833134302,
+      "avg_oracle_reward": 0.00141428191451168,
+      "output_dir": "output_raw_adaptive_threshold_compare_adaptive_reward_QQQ"
+    },
+    {
+      "policy": "adaptive_accuracy",
+      "final_equity": 278162.22351107176,
+      "reward_days": 1886,
+      "num_trades": 256,
+      "avg_chosen_reward": 0.0004175564273814975,
+      "avg_oracle_reward": 0.0014794931855448815,
+      "output_dir": "output_raw_adaptive_threshold_compare_adaptive_accuracy_QQQ"
+    },
+    {
+      "policy": "static",
+      "final_equity": 223994.47647273313,
+      "reward_days": 1886,
+      "num_trades": 902,
+      "avg_chosen_reward": 0.0003522109850885238,
+      "avg_oracle_reward": 0.0013217472758487747,
+      "output_dir": "output_raw_adaptive_threshold_compare_static_QQQ"
+    },
+    {
+      "policy": "threshold_pair_bandit",
+      "final_equity": 193105.414662185,
+      "reward_days": 1886,
+      "num_trades": 850,
+      "avg_chosen_reward": 0.0003342598492332361,
+      "avg_oracle_reward": 0.0013421855298952191,
+      "output_dir": "output_raw_adaptive_threshold_compare_threshold_pair_bandit_QQQ"
+    }
+  ]
+}
