@@ -14,6 +14,8 @@ class ResumeConfig:
     k5m_csv_path: str
     end_time: str
     output_dir: str
+    dp_lookback_override: Optional[int] = None
+    daily_threshold_lookback_days_override: Optional[int] = None
     verbose: bool = True
     plot_from_checkpoint: bool = True
 
@@ -62,6 +64,8 @@ def render_command_preview(resume: Optional[ResumeConfig], fresh: Optional[Fresh
             f'    k5m_csv_path="{data["k5m_csv_path"]}",\n'
             f'    end_time="{data["end_time"]}",\n'
             f'    output_dir="{data["output_dir"]}",\n'
+            f'    dp_lookback_override={data["dp_lookback_override"]},\n'
+            f'    daily_threshold_lookback_days_override={data["daily_threshold_lookback_days_override"]},\n'
             f'    verbose={data["verbose"]},\n'
             f'    plot_from_checkpoint={data["plot_from_checkpoint"]},\n'
             ")"
@@ -130,6 +134,17 @@ def main():
         k5m_csv_path = st.text_input("5m CSV", "DataAPI/data/SPY_5M.csv")
         end_time = st.text_input("End Time", "2026-12-31")
         output_dir = st.text_input("Output Dir", default_output_dir("output_control_panel_resume"))
+        override_dp_lookback = st.checkbox("Override dp_lookback", value=False)
+        dp_lookback_override = None
+        if override_dp_lookback:
+            dp_lookback_override = int(st.number_input("dp_lookback_override", min_value=1, value=5, step=1))
+
+        override_daily_threshold_lookback = st.checkbox("Override daily threshold lookback", value=False)
+        daily_threshold_lookback_days_override = None
+        if override_daily_threshold_lookback:
+            daily_threshold_lookback_days_override = int(
+                st.number_input("daily_threshold_lookback_days_override", min_value=1, value=15, step=1)
+            )
         verbose = st.checkbox("Verbose", value=True)
         plot_from_checkpoint = st.checkbox("Plot from checkpoint", value=True)
 
@@ -139,6 +154,8 @@ def main():
             k5m_csv_path=k5m_csv_path,
             end_time=end_time,
             output_dir=output_dir,
+            dp_lookback_override=dp_lookback_override,
+            daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
             verbose=verbose,
             plot_from_checkpoint=plot_from_checkpoint,
         )

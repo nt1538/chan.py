@@ -96,6 +96,12 @@ def _list_to_set(items) -> set:
     return out
 
 
+def _reward_action_for_gate(gate: str) -> str:
+    if gate in {"FORCE_BUY", "FORCE_SELL"}:
+        return gate
+    return "FREE"
+
+
 def _warm_chan_from_bars(chan_obj, bars: pd.DataFrame) -> Optional[pd.Timestamp]:
     if bars is None or bars.empty:
         return None
@@ -123,6 +129,276 @@ def _find_next_index_after(df: pd.DataFrame, ts: Optional[pd.Timestamp]) -> int:
         return 0
     idx = df.index[pd.to_datetime(df["timestamp"]) > pd.to_datetime(ts)]
     return int(idx[0]) if len(idx) else len(df)
+
+
+def _rows_up_to(rows: List[Dict[str, Any]], ts: pd.Timestamp, key: str = "timestamp") -> List[Dict[str, Any]]:
+    out = []
+    cutoff = pd.to_datetime(ts)
+    for row in rows or []:
+        row_ts = pd.to_datetime(row.get(key), errors="coerce")
+        if pd.isna(row_ts) or row_ts <= cutoff:
+            out.append(dict(row))
+    return out
+
+
+def _daily_reward_log_up_to(rows: List[Dict[str, Any]], ts: pd.Timestamp) -> List[Dict[str, Any]]:
+    out = []
+    cutoff = pd.to_datetime(ts).normalize()
+    for row in rows or []:
+        row_date = pd.to_datetime(row.get("date"), errors="coerce")
+        if pd.isna(row_date) or row_date.normalize() <= cutoff:
+            out.append(dict(row))
+    return out
+
+
+def _seen_daily_from_rows(rows: List[Dict[str, Any]]) -> set:
+    out = set()
+    for row in rows or []:
+        row_ts = pd.to_datetime(row.get("timestamp"), errors="coerce")
+        if pd.isna(row_ts):
+            continue
+        out.add((row_ts.strftime("%Y-%m-%d"), row.get("direction"), row.get("bsp_type", "?")))
+    return out
+
+
+def _seen_5m_from_rows(rows: List[Dict[str, Any]]) -> set:
+    return {
+        (int(row.get("klu_idx", -1)), str(row.get("direction")), str(row.get("bsp_type")))
+        for row in rows or []
+    }
+
+
+def _make_adaptive_reward_snapshot_bundle(
+    *,
+    source_bundle: Optional[dict],
+    code: str,
+    snapshot_ts: pd.Timestamp,
+    daily_csv_path: str,
+    k5m_csv_path: str,
+    daily_chan_start: str,
+    accumulation_start: str,
+    macro_files: dict,
+    df_day_raw: pd.DataFrame,
+    df_5m_raw: pd.DataFrame,
+    daily_prob_model,
+    daily_prob_trained_n: int,
+    X_days: List[Dict[str, float]],
+    y_days: List[int],
+    pending_idx: List[int],
+    p_by_day: Dict[pd.Timestamp, float],
+    p_series: np.ndarray,
+    dp_vs_minK_series: np.ndarray,
+    dp_vs_maxK_series: np.ndarray,
+    bsp_rows_daily: List[Dict[str, Any]],
+    seen_bsp_daily: set,
+    buy_pack: Optional[RetModelPack],
+    sell_pack: Optional[RetModelPack],
+    buy_ret_th_live: float,
+    sell_ret_th_live: float,
+    bsp_rows_5m: List[Dict[str, Any]],
+    seen_keys_5m: set,
+    daily_reward_log: List[Dict[str, Any]],
+    daily_chan_max_klines: int,
+    five_chan_max_klines: int,
+    daily_threshold_config: RollingThresholdConfig,
+    threshold_window_days: float,
+    threshold_ret_grid,
+    threshold_min_open_signals: int,
+    lookahead_days_5m: float,
+    retrain_every_days_5m: int,
+    min_samples_total_5m: int,
+    N_confirm: int,
+    min_labeled_days_to_train: int,
+    retrain_every_new_labels: int,
+    dp_lookback: int,
+    static_buy_level: float,
+    static_sell_level: float,
+) -> dict:
+    snapshot_ts = pd.to_datetime(snapshot_ts)
+    warm_daily = df_day_raw[df_day_raw["timestamp"] <= snapshot_ts].tail(int(daily_chan_max_klines)).copy()
+    warm_5m = df_5m_raw[df_5m_raw["timestamp"] <= snapshot_ts].tail(int(five_chan_max_klines)).copy()
+
+    bundle = dict(source_bundle or {})
+    bundle.update(
+        {
+            "schema": SNAPSHOT_SCHEMA,
+            "code": code,
+            "snapshot_time": str(snapshot_ts),
+            "daily_csv_path": daily_csv_path,
+            "k5m_csv_path": k5m_csv_path,
+            "original_daily_chan_start": str(daily_chan_start),
+            "original_accumulation_start": str(accumulation_start),
+            "macro_files": copy.deepcopy(macro_files),
+            "daily_prob_model": daily_prob_model,
+            "daily_prob_trained_n": int(daily_prob_trained_n),
+            "X_days": copy.deepcopy(X_days),
+            "y_days": copy.deepcopy(y_days),
+            "pending_idx": copy.deepcopy(pending_idx),
+            "p_by_day_str": {str(pd.to_datetime(k)): float(v) for k, v in p_by_day.items()},
+            "p_series": np.asarray(p_series, dtype=float),
+            "dp_vs_minK_series": np.asarray(dp_vs_minK_series, dtype=float),
+            "dp_vs_maxK_series": np.asarray(dp_vs_maxK_series, dtype=float),
+            "bsp_rows_daily": _copy_list_of_dicts(bsp_rows_daily),
+            "seen_bsp_daily_list": _set_to_list(seen_bsp_daily),
+            "buy_pack": pack_ret_modelpack_for_save(buy_pack),
+            "sell_pack": pack_ret_modelpack_for_save(sell_pack),
+            "buy_ret_th_live": float(buy_ret_th_live),
+            "sell_ret_th_live": float(sell_ret_th_live),
+            "bsp_rows_5m": _copy_list_of_dicts(bsp_rows_5m),
+            "seen_keys_5m_list": _set_to_list(seen_keys_5m),
+            "daily_reward_log": _copy_list_of_dicts(daily_reward_log),
+            "warmup_daily_bars": warm_daily[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
+            "warmup_5m_bars": warm_5m[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
+            "daily_chan_max_klines": int(daily_chan_max_klines),
+            "five_chan_max_klines": int(five_chan_max_klines),
+            "daily_threshold_config": copy.deepcopy(daily_threshold_config),
+            "threshold_window_days": float(threshold_window_days),
+            "threshold_ret_grid": list(threshold_ret_grid if threshold_ret_grid is not None else make_ret_grid(-0.5, 2.5, 0.05)),
+            "threshold_min_open_signals": int(threshold_min_open_signals),
+            "lookahead_days_5m": float(lookahead_days_5m),
+            "retrain_every_days_5m": int(retrain_every_days_5m),
+            "min_samples_total_5m": int(min_samples_total_5m),
+            "N_confirm": int(N_confirm),
+            "min_labeled_days_to_train": int(min_labeled_days_to_train),
+            "retrain_every_new_labels": int(retrain_every_new_labels),
+            "dp_lookback": int(dp_lookback),
+            "static_buy_level": float(static_buy_level),
+            "static_sell_level": float(static_sell_level),
+        }
+    )
+    return bundle
+
+
+def _autosave_year_start_snapshots(
+    *,
+    output_dir: str,
+    source_path: str,
+    source_bundle: Optional[dict],
+    data: dict,
+    code: str,
+    daily_csv_path: str,
+    k5m_csv_path: str,
+    daily_chan_start: str,
+    accumulation_start: str,
+    daily_prob_model,
+    daily_prob_trained_n: int,
+    X_days: List[Dict[str, float]],
+    y_days: List[int],
+    pending_idx: List[int],
+    p_by_day: Dict[pd.Timestamp, float],
+    p_series: np.ndarray,
+    dp_vs_minK_series: np.ndarray,
+    dp_vs_maxK_series: np.ndarray,
+    bsp_rows_daily: List[Dict[str, Any]],
+    buy_pack: Optional[RetModelPack],
+    sell_pack: Optional[RetModelPack],
+    buy_ret_th_live: float,
+    sell_ret_th_live: float,
+    bsp_rows_5m: List[Dict[str, Any]],
+    daily_reward_log: List[Dict[str, Any]],
+    daily_chan_max_klines: int,
+    five_chan_max_klines: int,
+    daily_threshold_config: RollingThresholdConfig,
+    threshold_window_days: float,
+    threshold_ret_grid,
+    threshold_min_open_signals: int,
+    lookahead_days_5m: float,
+    retrain_every_days_5m: int,
+    min_samples_total_5m: int,
+    N_confirm: int,
+    min_labeled_days_to_train: int,
+    retrain_every_new_labels: int,
+    dp_lookback: int,
+    static_buy_level: float,
+    static_sell_level: float,
+    start_after: pd.Timestamp,
+    end_time: str,
+    verbose: bool,
+) -> List[str]:
+    df_5m_idx = data["df_5m_idx"]
+    if df_5m_idx.empty:
+        return []
+
+    start_after = pd.to_datetime(start_after)
+    end_ts = pd.to_datetime(end_time)
+    days = pd.to_datetime(df_5m_idx["timestamp"]).dt.normalize().drop_duplicates().sort_values()
+    year_start_days = []
+    for year, group in days.groupby(days.dt.year):
+        first_day = pd.to_datetime(group.iloc[0])
+        if first_day > start_after and first_day <= end_ts:
+            year_start_days.append(first_day)
+
+    if not year_start_days:
+        return []
+
+    checkpoint_dir = Path(output_dir) / "year_start_checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    source = Path(source_path)
+    suffix = source.suffix or ".joblib"
+    saved_paths = []
+
+    for year_start in year_start_days:
+        boundary_5m = pd.to_datetime(df_5m_idx.loc[pd.to_datetime(df_5m_idx["timestamp"]).dt.normalize() == year_start, "timestamp"].iloc[0])
+        daily_rows = _rows_up_to(bsp_rows_daily, boundary_5m)
+        rows_5m = _rows_up_to(bsp_rows_5m, boundary_5m)
+        reward_log = _daily_reward_log_up_to(daily_reward_log, boundary_5m)
+        p_by_day_cut = {
+            pd.to_datetime(day).normalize(): float(value)
+            for day, value in p_by_day.items()
+            if pd.to_datetime(day).normalize() <= year_start
+        }
+        bundle = _make_adaptive_reward_snapshot_bundle(
+            source_bundle=source_bundle,
+            code=code,
+            snapshot_ts=boundary_5m,
+            daily_csv_path=daily_csv_path,
+            k5m_csv_path=k5m_csv_path,
+            daily_chan_start=daily_chan_start,
+            accumulation_start=accumulation_start,
+            macro_files=data["macro_files"],
+            df_day_raw=data["df_day_raw"],
+            df_5m_raw=data["df_5m_raw"],
+            daily_prob_model=daily_prob_model,
+            daily_prob_trained_n=daily_prob_trained_n,
+            X_days=X_days,
+            y_days=y_days,
+            pending_idx=pending_idx,
+            p_by_day=p_by_day_cut,
+            p_series=p_series,
+            dp_vs_minK_series=dp_vs_minK_series,
+            dp_vs_maxK_series=dp_vs_maxK_series,
+            bsp_rows_daily=daily_rows,
+            seen_bsp_daily=_seen_daily_from_rows(daily_rows),
+            buy_pack=buy_pack,
+            sell_pack=sell_pack,
+            buy_ret_th_live=buy_ret_th_live,
+            sell_ret_th_live=sell_ret_th_live,
+            bsp_rows_5m=rows_5m,
+            seen_keys_5m=_seen_5m_from_rows(rows_5m),
+            daily_reward_log=reward_log,
+            daily_chan_max_klines=daily_chan_max_klines,
+            five_chan_max_klines=five_chan_max_klines,
+            daily_threshold_config=daily_threshold_config,
+            threshold_window_days=threshold_window_days,
+            threshold_ret_grid=threshold_ret_grid,
+            threshold_min_open_signals=threshold_min_open_signals,
+            lookahead_days_5m=lookahead_days_5m,
+            retrain_every_days_5m=retrain_every_days_5m,
+            min_samples_total_5m=min_samples_total_5m,
+            N_confirm=N_confirm,
+            min_labeled_days_to_train=min_labeled_days_to_train,
+            retrain_every_new_labels=retrain_every_new_labels,
+            dp_lookback=dp_lookback,
+            static_buy_level=static_buy_level,
+            static_sell_level=static_sell_level,
+        )
+        path = checkpoint_dir / f"{source.stem}__start_{year_start.year}{suffix}"
+        save_joblib(str(path), bundle)
+        saved_paths.append(str(path))
+        if verbose:
+            print(f"[CHECKPOINT] autosaved year-start snapshot -> {path}")
+
+    return saved_paths
 
 
 def _build_data_views(
@@ -448,7 +724,7 @@ def _run_adaptive_reward_5m_phase(
                     sell_ret_th_live=sell_ret_th_live,
                     fee_pct=fee_pct,
                 )
-                chosen_reward = reward_map[day_gate]["day_return"]
+                chosen_reward = reward_map[_reward_action_for_gate(day_gate)]["day_return"]
                 best_action_ex_post = max(
                     ["FORCE_BUY", "FREE", "FORCE_SELL"],
                     key=lambda k: reward_map[k]["day_return"],
@@ -613,7 +889,7 @@ def _run_adaptive_reward_5m_phase(
             sell_ret_th_live=sell_ret_th_live,
             fee_pct=fee_pct,
         )
-        chosen_reward = reward_map[day_gate]["day_return"]
+        chosen_reward = reward_map[_reward_action_for_gate(day_gate)]["day_return"]
         best_action_ex_post = max(
             ["FORCE_BUY", "FREE", "FORCE_SELL"],
             key=lambda k: reward_map[k]["day_return"],
@@ -697,6 +973,7 @@ def build_adaptive_reward_snapshot(
     static_sell_level: float = 0.30,
     daily_threshold_config: Optional[RollingThresholdConfig] = None,
     output_dir: str = "output_adaptive_reward_snapshot_build",
+    autosave_year_start_checkpoints: bool = True,
     verbose: bool = True,
 ) -> dict:
     os.makedirs(output_dir, exist_ok=True)
@@ -808,55 +1085,100 @@ def build_adaptive_reward_snapshot(
     )
 
     snapshot_ts = pd.to_datetime(snapshot_end_time)
-    warm_daily = data["df_day_raw"][data["df_day_raw"]["timestamp"] <= snapshot_ts].tail(int(daily_chan_max_klines)).copy()
-    warm_5m = data["df_5m_raw"][data["df_5m_raw"]["timestamp"] <= snapshot_ts].tail(int(five_chan_max_klines)).copy()
-
-    bundle = {
-        "schema": SNAPSHOT_SCHEMA,
-        "code": code,
-        "snapshot_time": str(snapshot_ts),
-        "daily_csv_path": daily_csv_path,
-        "k5m_csv_path": k5m_csv_path,
-        "original_daily_chan_start": str(daily_chan_start),
-        "original_accumulation_start": str(accumulation_start),
-        "macro_files": copy.deepcopy(data["macro_files"]),
-        "daily_prob_model": st.model,
-        "daily_prob_trained_n": int(st.trained_n),
-        "X_days": copy.deepcopy(X_days),
-        "y_days": copy.deepcopy(y_days),
-        "pending_idx": copy.deepcopy(pending_idx),
-        "p_by_day_str": {str(pd.to_datetime(k)): float(v) for k, v in p_by_day.items()},
-        "p_series": np.asarray(p_series, dtype=float),
-        "dp_vs_minK_series": np.asarray(dp_vs_minK_series, dtype=float),
-        "dp_vs_maxK_series": np.asarray(dp_vs_maxK_series, dtype=float),
-        "bsp_rows_daily": _copy_list_of_dicts(bsp_rows_daily),
-        "seen_bsp_daily_list": _set_to_list(seen_bsp_daily),
-        "buy_pack": pack_ret_modelpack_for_save(phase2["buy_pack"]),
-        "sell_pack": pack_ret_modelpack_for_save(phase2["sell_pack"]),
-        "buy_ret_th_live": float(phase2["buy_ret_th_live"]),
-        "sell_ret_th_live": float(phase2["sell_ret_th_live"]),
-        "bsp_rows_5m": _copy_list_of_dicts(phase2["bsp_rows_5m"]),
-        "seen_keys_5m_list": _set_to_list(phase2["seen_keys_5m"]),
-        "daily_reward_log": _copy_list_of_dicts(phase2["daily_reward_log"]),
-        "warmup_daily_bars": warm_daily[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
-        "warmup_5m_bars": warm_5m[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
-        "daily_chan_max_klines": int(daily_chan_max_klines),
-        "five_chan_max_klines": int(five_chan_max_klines),
-        "daily_threshold_config": copy.deepcopy(daily_threshold_config),
-        "threshold_window_days": float(threshold_window_days),
-        "threshold_ret_grid": list(threshold_ret_grid if threshold_ret_grid is not None else make_ret_grid(-0.5, 2.5, 0.05)),
-        "threshold_min_open_signals": int(threshold_min_open_signals),
-        "lookahead_days_5m": float(lookahead_days_5m),
-        "retrain_every_days_5m": int(retrain_every_days_5m),
-        "min_samples_total_5m": int(min_samples_total_5m),
-        "N_confirm": int(N_confirm),
-        "min_labeled_days_to_train": int(min_labeled_days_to_train),
-        "retrain_every_new_labels": int(retrain_every_new_labels),
-        "dp_lookback": int(dp_lookback),
-        "static_buy_level": float(static_buy_level),
-        "static_sell_level": float(static_sell_level),
-    }
+    bundle = _make_adaptive_reward_snapshot_bundle(
+        source_bundle=None,
+        code=code,
+        snapshot_ts=snapshot_ts,
+        daily_csv_path=daily_csv_path,
+        k5m_csv_path=k5m_csv_path,
+        daily_chan_start=daily_chan_start,
+        accumulation_start=accumulation_start,
+        macro_files=data["macro_files"],
+        df_day_raw=data["df_day_raw"],
+        df_5m_raw=data["df_5m_raw"],
+        daily_prob_model=st.model,
+        daily_prob_trained_n=st.trained_n,
+        X_days=X_days,
+        y_days=y_days,
+        pending_idx=pending_idx,
+        p_by_day=p_by_day,
+        p_series=p_series,
+        dp_vs_minK_series=dp_vs_minK_series,
+        dp_vs_maxK_series=dp_vs_maxK_series,
+        bsp_rows_daily=bsp_rows_daily,
+        seen_bsp_daily=seen_bsp_daily,
+        buy_pack=phase2["buy_pack"],
+        sell_pack=phase2["sell_pack"],
+        buy_ret_th_live=phase2["buy_ret_th_live"],
+        sell_ret_th_live=phase2["sell_ret_th_live"],
+        bsp_rows_5m=phase2["bsp_rows_5m"],
+        seen_keys_5m=phase2["seen_keys_5m"],
+        daily_reward_log=phase2["daily_reward_log"],
+        daily_chan_max_klines=daily_chan_max_klines,
+        five_chan_max_klines=five_chan_max_klines,
+        daily_threshold_config=daily_threshold_config,
+        threshold_window_days=threshold_window_days,
+        threshold_ret_grid=threshold_ret_grid,
+        threshold_min_open_signals=threshold_min_open_signals,
+        lookahead_days_5m=lookahead_days_5m,
+        retrain_every_days_5m=retrain_every_days_5m,
+        min_samples_total_5m=min_samples_total_5m,
+        N_confirm=N_confirm,
+        min_labeled_days_to_train=min_labeled_days_to_train,
+        retrain_every_new_labels=retrain_every_new_labels,
+        dp_lookback=dp_lookback,
+        static_buy_level=static_buy_level,
+        static_sell_level=static_sell_level,
+    )
     save_joblib(snapshot_path, bundle)
+
+    year_start_checkpoint_paths = []
+    if autosave_year_start_checkpoints:
+        year_start_checkpoint_paths = _autosave_year_start_snapshots(
+            output_dir=output_dir,
+            source_path=snapshot_path,
+            source_bundle=bundle,
+            data=data,
+            code=code,
+            daily_csv_path=daily_csv_path,
+            k5m_csv_path=k5m_csv_path,
+            daily_chan_start=daily_chan_start,
+            accumulation_start=accumulation_start,
+            daily_prob_model=st.model,
+            daily_prob_trained_n=st.trained_n,
+            X_days=X_days,
+            y_days=y_days,
+            pending_idx=pending_idx,
+            p_by_day=p_by_day,
+            p_series=p_series,
+            dp_vs_minK_series=dp_vs_minK_series,
+            dp_vs_maxK_series=dp_vs_maxK_series,
+            bsp_rows_daily=bsp_rows_daily,
+            buy_pack=phase2["buy_pack"],
+            sell_pack=phase2["sell_pack"],
+            buy_ret_th_live=phase2["buy_ret_th_live"],
+            sell_ret_th_live=phase2["sell_ret_th_live"],
+            bsp_rows_5m=phase2["bsp_rows_5m"],
+            daily_reward_log=phase2["daily_reward_log"],
+            daily_chan_max_klines=daily_chan_max_klines,
+            five_chan_max_klines=five_chan_max_klines,
+            daily_threshold_config=daily_threshold_config,
+            threshold_window_days=threshold_window_days,
+            threshold_ret_grid=threshold_ret_grid,
+            threshold_min_open_signals=threshold_min_open_signals,
+            lookahead_days_5m=lookahead_days_5m,
+            retrain_every_days_5m=retrain_every_days_5m,
+            min_samples_total_5m=min_samples_total_5m,
+            N_confirm=N_confirm,
+            min_labeled_days_to_train=min_labeled_days_to_train,
+            retrain_every_new_labels=retrain_every_new_labels,
+            dp_lookback=dp_lookback,
+            static_buy_level=static_buy_level,
+            static_sell_level=static_sell_level,
+            start_after=pd.to_datetime(accumulation_start),
+            end_time=snapshot_end_time,
+            verbose=verbose,
+        )
 
     trades_df = phase2["trades_df"]
     daily_log_df = phase2["daily_log_df"]
@@ -870,6 +1192,7 @@ def build_adaptive_reward_snapshot(
         "trades_df": trades_df,
         "daily_log_df": daily_log_df,
         "daily_reward_df": pd.DataFrame(bundle["daily_reward_log"]),
+        "year_start_checkpoint_paths": year_start_checkpoint_paths,
         "output_dir": output_dir,
     }
 
@@ -881,8 +1204,11 @@ def run_adaptive_reward_from_snapshot(
     sim_start: Optional[str] = None,
     initial_capital: float = 100000.0,
     fee_pct: float = 0.0,
+    dp_lookback_override: Optional[int] = None,
+    daily_threshold_lookback_days_override: Optional[int] = None,
     output_dir: str = "output_adaptive_reward_resumed_fresh",
     save_snapshot_path: Optional[str] = None,
+    autosave_year_start_checkpoints: bool = True,
     verbose: bool = True,
 ) -> dict:
     os.makedirs(output_dir, exist_ok=True)
@@ -896,6 +1222,15 @@ def run_adaptive_reward_from_snapshot(
     accumulation_start = bundle["original_accumulation_start"]
     snapshot_time = pd.to_datetime(bundle["snapshot_time"])
     sim_start = sim_start or str((snapshot_time + pd.Timedelta(days=1)).date())
+    dp_lookback = int(bundle.get("dp_lookback", 5) if dp_lookback_override is None else dp_lookback_override)
+    if dp_lookback < 1:
+        raise ValueError("dp_lookback_override must be >= 1")
+
+    daily_threshold_config = copy.deepcopy(bundle.get("daily_threshold_config") or _default_daily_threshold_config())
+    if daily_threshold_lookback_days_override is not None:
+        daily_threshold_config.lookback_days = int(daily_threshold_lookback_days_override)
+    if int(daily_threshold_config.lookback_days) < 1:
+        raise ValueError("daily_threshold_lookback_days_override must be >= 1")
 
     data = _build_data_views(
         daily_csv_path=daily_csv_path,
@@ -969,7 +1304,7 @@ def run_adaptive_reward_from_snapshot(
         N_confirm=int(bundle.get("N_confirm", 5)),
         min_labeled_days_to_train=int(bundle.get("min_labeled_days_to_train", 200)),
         retrain_every_new_labels=int(bundle.get("retrain_every_new_labels", 25)),
-        dp_lookback=int(bundle.get("dp_lookback", 5)),
+        dp_lookback=dp_lookback,
         verbose=verbose,
         st=st,
         bsp_rows_daily=bsp_rows_daily,
@@ -1008,7 +1343,7 @@ def run_adaptive_reward_from_snapshot(
         lookahead_days_5m=float(bundle.get("lookahead_days_5m", 2.0)),
         retrain_every_days_5m=int(bundle.get("retrain_every_days_5m", 5)),
         min_samples_total_5m=int(bundle.get("min_samples_total_5m", 300)),
-        daily_threshold_config=bundle.get("daily_threshold_config") or _default_daily_threshold_config(),
+        daily_threshold_config=daily_threshold_config,
         static_buy_level=float(bundle.get("static_buy_level", 0.20)),
         static_sell_level=float(bundle.get("static_sell_level", 0.30)),
         buy_ret_th_live=float(bundle.get("buy_ret_th_live", 0.30)),
@@ -1095,36 +1430,100 @@ def run_adaptive_reward_from_snapshot(
         save_snapshot_path = str(source.with_name(f"{source.stem}__continued{source.suffix or '.joblib'}"))
 
     final_ts = pd.to_datetime(data["df_5m_idx"]["timestamp"].iloc[-1]) if not data["df_5m_idx"].empty else pd.to_datetime(end_time)
-    warm_daily = data["df_day_raw"][data["df_day_raw"]["timestamp"] <= final_ts].tail(int(bundle.get("daily_chan_max_klines", 500))).copy()
-    warm_5m = data["df_5m_raw"][data["df_5m_raw"]["timestamp"] <= final_ts].tail(int(bundle.get("five_chan_max_klines", 500))).copy()
-    continued_bundle = dict(bundle)
-    continued_bundle.update(
-        {
-            "schema": SNAPSHOT_SCHEMA,
-            "snapshot_time": str(final_ts),
-            "daily_prob_model": st.model,
-            "daily_prob_trained_n": int(st.trained_n),
-            "X_days": copy.deepcopy(X_days),
-            "y_days": copy.deepcopy(y_days),
-            "pending_idx": copy.deepcopy(pending_idx),
-            "p_by_day_str": {str(pd.to_datetime(k)): float(v) for k, v in p_by_day.items()},
-            "p_series": np.asarray(p_series, dtype=float),
-            "dp_vs_minK_series": np.asarray(dp_vs_minK_series, dtype=float),
-            "dp_vs_maxK_series": np.asarray(dp_vs_maxK_series, dtype=float),
-            "bsp_rows_daily": _copy_list_of_dicts(bsp_rows_daily),
-            "seen_bsp_daily_list": _set_to_list(seen_bsp_daily),
-            "buy_pack": pack_ret_modelpack_for_save(phase2["buy_pack"]),
-            "sell_pack": pack_ret_modelpack_for_save(phase2["sell_pack"]),
-            "buy_ret_th_live": float(phase2["buy_ret_th_live"]),
-            "sell_ret_th_live": float(phase2["sell_ret_th_live"]),
-            "bsp_rows_5m": _copy_list_of_dicts(phase2["bsp_rows_5m"]),
-            "seen_keys_5m_list": _set_to_list(phase2["seen_keys_5m"]),
-            "daily_reward_log": _copy_list_of_dicts(phase2["daily_reward_log"]),
-            "warmup_daily_bars": warm_daily[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
-            "warmup_5m_bars": warm_5m[["timestamp", "_open", "_high", "_low", "_close", "_vol"]].reset_index(drop=True),
-        }
+    continued_bundle = _make_adaptive_reward_snapshot_bundle(
+        source_bundle=bundle,
+        code=bundle.get("code", "QQQ"),
+        snapshot_ts=final_ts,
+        daily_csv_path=daily_csv_path,
+        k5m_csv_path=k5m_csv_path,
+        daily_chan_start=daily_chan_start,
+        accumulation_start=accumulation_start,
+        macro_files=data["macro_files"],
+        df_day_raw=data["df_day_raw"],
+        df_5m_raw=data["df_5m_raw"],
+        daily_prob_model=st.model,
+        daily_prob_trained_n=st.trained_n,
+        X_days=X_days,
+        y_days=y_days,
+        pending_idx=pending_idx,
+        p_by_day=p_by_day,
+        p_series=p_series,
+        dp_vs_minK_series=dp_vs_minK_series,
+        dp_vs_maxK_series=dp_vs_maxK_series,
+        bsp_rows_daily=bsp_rows_daily,
+        seen_bsp_daily=seen_bsp_daily,
+        buy_pack=phase2["buy_pack"],
+        sell_pack=phase2["sell_pack"],
+        buy_ret_th_live=phase2["buy_ret_th_live"],
+        sell_ret_th_live=phase2["sell_ret_th_live"],
+        bsp_rows_5m=phase2["bsp_rows_5m"],
+        seen_keys_5m=phase2["seen_keys_5m"],
+        daily_reward_log=phase2["daily_reward_log"],
+        daily_chan_max_klines=int(bundle.get("daily_chan_max_klines", 500)),
+        five_chan_max_klines=int(bundle.get("five_chan_max_klines", 500)),
+        daily_threshold_config=daily_threshold_config,
+        threshold_window_days=float(bundle.get("threshold_window_days", 2.0)),
+        threshold_ret_grid=bundle.get("threshold_ret_grid"),
+        threshold_min_open_signals=int(bundle.get("threshold_min_open_signals", 10)),
+        lookahead_days_5m=float(bundle.get("lookahead_days_5m", 2.0)),
+        retrain_every_days_5m=int(bundle.get("retrain_every_days_5m", 5)),
+        min_samples_total_5m=int(bundle.get("min_samples_total_5m", 300)),
+        N_confirm=int(bundle.get("N_confirm", 5)),
+        min_labeled_days_to_train=int(bundle.get("min_labeled_days_to_train", 200)),
+        retrain_every_new_labels=int(bundle.get("retrain_every_new_labels", 25)),
+        dp_lookback=dp_lookback,
+        static_buy_level=float(bundle.get("static_buy_level", 0.20)),
+        static_sell_level=float(bundle.get("static_sell_level", 0.30)),
     )
     save_joblib(save_snapshot_path, continued_bundle)
+
+    year_start_checkpoint_paths = []
+    if autosave_year_start_checkpoints:
+        year_start_checkpoint_paths = _autosave_year_start_snapshots(
+            output_dir=output_dir,
+            source_path=save_snapshot_path,
+            source_bundle=continued_bundle,
+            data=data,
+            code=bundle.get("code", "QQQ"),
+            daily_csv_path=daily_csv_path,
+            k5m_csv_path=k5m_csv_path,
+            daily_chan_start=daily_chan_start,
+            accumulation_start=accumulation_start,
+            daily_prob_model=st.model,
+            daily_prob_trained_n=st.trained_n,
+            X_days=X_days,
+            y_days=y_days,
+            pending_idx=pending_idx,
+            p_by_day=p_by_day,
+            p_series=p_series,
+            dp_vs_minK_series=dp_vs_minK_series,
+            dp_vs_maxK_series=dp_vs_maxK_series,
+            bsp_rows_daily=bsp_rows_daily,
+            buy_pack=phase2["buy_pack"],
+            sell_pack=phase2["sell_pack"],
+            buy_ret_th_live=phase2["buy_ret_th_live"],
+            sell_ret_th_live=phase2["sell_ret_th_live"],
+            bsp_rows_5m=phase2["bsp_rows_5m"],
+            daily_reward_log=phase2["daily_reward_log"],
+            daily_chan_max_klines=int(bundle.get("daily_chan_max_klines", 500)),
+            five_chan_max_klines=int(bundle.get("five_chan_max_klines", 500)),
+            daily_threshold_config=daily_threshold_config,
+            threshold_window_days=float(bundle.get("threshold_window_days", 2.0)),
+            threshold_ret_grid=bundle.get("threshold_ret_grid"),
+            threshold_min_open_signals=int(bundle.get("threshold_min_open_signals", 10)),
+            lookahead_days_5m=float(bundle.get("lookahead_days_5m", 2.0)),
+            retrain_every_days_5m=int(bundle.get("retrain_every_days_5m", 5)),
+            min_samples_total_5m=int(bundle.get("min_samples_total_5m", 300)),
+            N_confirm=int(bundle.get("N_confirm", 5)),
+            min_labeled_days_to_train=int(bundle.get("min_labeled_days_to_train", 200)),
+            retrain_every_new_labels=int(bundle.get("retrain_every_new_labels", 25)),
+            dp_lookback=dp_lookback,
+            static_buy_level=float(bundle.get("static_buy_level", 0.20)),
+            static_sell_level=float(bundle.get("static_sell_level", 0.30)),
+            start_after=snapshot_time,
+            end_time=end_time,
+            verbose=verbose,
+        )
 
     if verbose:
         print(f"[SAVED] {os.path.join(output_dir, 'trades.csv')}")
@@ -1144,6 +1543,9 @@ def run_adaptive_reward_from_snapshot(
         "trades_df": trades_df,
         "daily_log_df": daily_log_df,
         "daily_reward_df": daily_reward_df,
+        "year_start_checkpoint_paths": year_start_checkpoint_paths,
         "buy_hold": buy_hold,
+        "dp_lookback": int(dp_lookback),
+        "daily_threshold_lookback_days": int(daily_threshold_config.lookback_days),
         "output_dir": output_dir,
     }
