@@ -1,0 +1,2 @@
+date,equity,cash,pos,buy_th,sell_th,p_day,daily_action,daily_buy_level,daily_sell_level
+2026-05-26,100000.0,100000.0,0,-0.5,-0.5,0.20076378761212454,FORCE_BUY,0.24,0.26

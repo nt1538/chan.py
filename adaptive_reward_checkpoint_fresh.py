@@ -61,6 +61,109 @@ from pipelineCurrent import (
 SNAPSHOT_SCHEMA = "adaptive_reward_fresh_start_v1"
 
 
+def _standardize_ohlcv_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["timestamp", "Open", "High", "Low", "Close", "Volume"])
+
+    out = df.copy()
+    if isinstance(out.columns, pd.MultiIndex):
+        out.columns = [
+            str(next((part for part in c if str(part).lower() not in {"", "none"}), c[0]))
+            for c in out.columns
+        ]
+    out = out.reset_index()
+
+    ts_col = None
+    for c in out.columns:
+        if str(c).lower() in {"timestamp", "datetime", "date"}:
+            ts_col = c
+            break
+    if ts_col is None:
+        ts_col = out.columns[0]
+
+    rename = {ts_col: "timestamp"}
+    for src, dst in [
+        ("open", "Open"),
+        ("high", "High"),
+        ("low", "Low"),
+        ("close", "Close"),
+        ("adj close", "Close"),
+        ("volume", "Volume"),
+    ]:
+        for c in out.columns:
+            if str(c).strip().lower() == src:
+                rename[c] = dst
+                break
+
+    out = out.rename(columns=rename)
+    out = out.loc[:, ~out.columns.duplicated(keep="first")]
+    if "Volume" not in out.columns:
+        out["Volume"] = 0.0
+    out = out[["timestamp", "Open", "High", "Low", "Close", "Volume"]].copy()
+    out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce")
+    for c in ["Open", "High", "Low", "Close", "Volume"]:
+        out[c] = pd.to_numeric(out[c], errors="coerce")
+    out = out.dropna(subset=["timestamp", "Open", "High", "Low", "Close"])
+
+    ts = out["timestamp"]
+    try:
+        if getattr(ts.dt, "tz", None) is not None:
+            out["timestamp"] = ts.dt.tz_convert("America/New_York").dt.tz_localize(None)
+    except Exception:
+        try:
+            out["timestamp"] = ts.dt.tz_localize(None)
+        except Exception:
+            pass
+
+    return out.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+
+
+def fetch_yfinance_ohlcv(
+    *,
+    code: str,
+    start: str,
+    end: Optional[str] = None,
+    interval: str = "5m",
+) -> pd.DataFrame:
+    try:
+        import yfinance as yf
+    except ImportError as exc:
+        raise ImportError("Install yfinance to fetch realtime Yahoo Finance bars.") from exc
+
+    start_ts = pd.to_datetime(start)
+    end_ts = pd.to_datetime(end) if end is not None else pd.Timestamp.now()
+    if end_ts <= start_ts:
+        return _standardize_ohlcv_frame(pd.DataFrame())
+
+    raw = yf.download(
+        code,
+        start=start_ts,
+        end=end_ts + pd.Timedelta(days=1),
+        interval=interval,
+        progress=False,
+        auto_adjust=False,
+        prepost=False,
+    )
+    return _standardize_ohlcv_frame(raw)
+
+
+def _merge_ohlcv_csv_with_new_bars(csv_path: str, new_bars: pd.DataFrame, out_path: str) -> str:
+    old = _standardize_ohlcv_frame(pd.read_csv(csv_path))
+    new = _standardize_ohlcv_frame(new_bars)
+    if not new.empty:
+        replace_days = set(pd.to_datetime(new["timestamp"]).dt.normalize())
+        old = old[~pd.to_datetime(old["timestamp"]).dt.normalize().isin(replace_days)].copy()
+    merged = (
+        pd.concat([old, new], ignore_index=True)
+        .sort_values("timestamp")
+        .drop_duplicates("timestamp", keep="last")
+        .reset_index(drop=True)
+    )
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    merged.to_csv(out_path, index=False)
+    return out_path
+
+
 def _default_daily_threshold_config() -> RollingThresholdConfig:
     return RollingThresholdConfig(
         lookback_days=15,
@@ -213,6 +316,7 @@ def _make_adaptive_reward_snapshot_bundle(
     dp_lookback: int,
     static_buy_level: float,
     static_sell_level: float,
+    execution_engine_state: Optional[dict] = None,
 ) -> dict:
     snapshot_ts = pd.to_datetime(snapshot_ts)
     warm_daily = df_day_raw[df_day_raw["timestamp"] <= snapshot_ts].tail(int(daily_chan_max_klines)).copy()
@@ -264,6 +368,7 @@ def _make_adaptive_reward_snapshot_bundle(
             "dp_lookback": int(dp_lookback),
             "static_buy_level": float(static_buy_level),
             "static_sell_level": float(static_sell_level),
+            "execution_engine_state": copy.deepcopy(execution_engine_state),
         }
     )
     return bundle
@@ -588,7 +693,9 @@ def _run_adaptive_reward_5m_phase(
     sell_ret_th_live: float,
     sim_start: Optional[str],
     verbose: bool,
+    trade_start: Optional[str] = None,
     start_idx: int = 0,
+    execution_engine_state: Optional[dict] = None,
 ) -> dict:
     if threshold_ret_grid is None:
         threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.05)
@@ -598,6 +705,8 @@ def _run_adaptive_reward_5m_phase(
     }
 
     engine = ExecutionEngine(initial_capital=initial_capital, fee_pct=fee_pct)
+    if execution_engine_state:
+        engine.load_state_dict(execution_engine_state)
     last_train_day = None
     last_day_end_idx = None
     current_day = None
@@ -616,6 +725,16 @@ def _run_adaptive_reward_5m_phase(
     buy_ret_th_live = float(buy_ret_th_live)
     sell_ret_th_live = float(sell_ret_th_live)
     sim_start_ts = None if sim_start is None else pd.to_datetime(sim_start)
+    trade_start_ts = None if trade_start is None else pd.to_datetime(trade_start)
+    if trade_start_ts is not None and getattr(trade_start_ts, "tzinfo", None) is not None:
+        trade_start_ts = trade_start_ts.tz_convert(None)
+
+    if trade_start_ts is not None and engine.pending_order is not None:
+        pending_ts = pd.to_datetime((engine.pending_order.get("meta") or {}).get("ts"), errors="coerce")
+        if not pd.isna(pending_ts) and getattr(pending_ts, "tzinfo", None) is not None:
+            pending_ts = pending_ts.tz_convert(None)
+        if pd.isna(pending_ts) or pending_ts < trade_start_ts:
+            engine.pending_order = None
 
     def maybe_retrain_5m(day_ts: pd.Timestamp):
         nonlocal buy_pack, sell_pack, last_train_day
@@ -806,6 +925,8 @@ def _run_adaptive_reward_5m_phase(
             event_ts = pd.to_datetime(r.get("timestamp", bar_ts), errors="coerce")
             if pd.isna(event_ts):
                 event_ts = bar_ts
+            if getattr(event_ts, "tzinfo", None) is not None:
+                event_ts = event_ts.tz_convert(None)
             global_ki = timestamp_to_idx.get(pd.to_datetime(event_ts), int(i))
             r["timestamp"] = str(event_ts)
             r["klu_idx"] = int(global_ki)
@@ -828,6 +949,8 @@ def _run_adaptive_reward_5m_phase(
                 day_events_today.append(copy.deepcopy(r))
 
             if not in_sim:
+                continue
+            if trade_start_ts is not None and event_ts < trade_start_ts:
                 continue
             if int(r["klu_idx"]) < int(start_idx):
                 continue
@@ -931,6 +1054,15 @@ def _run_adaptive_reward_5m_phase(
             }
         )
 
+    trades_df = pd.DataFrame(engine.trades)
+    if not trades_df.empty and "seen_idx" in trades_df.columns:
+        exec_idx = pd.to_numeric(trades_df["seen_idx"], errors="coerce") + 1
+        trades_df["exec_idx"] = exec_idx
+        trades_df["exec_ts"] = [
+            df_5m_idx.loc[int(i), "timestamp"] if pd.notna(i) and 0 <= int(i) < len(df_5m_idx) else pd.NaT
+            for i in exec_idx
+        ]
+
     return {
         "buy_pack": buy_pack,
         "sell_pack": sell_pack,
@@ -939,8 +1071,9 @@ def _run_adaptive_reward_5m_phase(
         "bsp_rows_5m": bsp_rows_5m,
         "seen_keys_5m": seen_keys_5m,
         "daily_reward_log": daily_reward_log,
+        "execution_engine_state": engine.state_dict(),
         "daily_log": daily_log,
-        "trades_df": pd.DataFrame(engine.trades),
+        "trades_df": trades_df,
         "daily_log_df": pd.DataFrame(daily_log),
     }
 
@@ -1129,6 +1262,7 @@ def build_adaptive_reward_snapshot(
         dp_lookback=dp_lookback,
         static_buy_level=static_buy_level,
         static_sell_level=static_sell_level,
+        execution_engine_state=phase2["execution_engine_state"],
     )
     save_joblib(snapshot_path, bundle)
 
@@ -1202,6 +1336,7 @@ def run_adaptive_reward_from_snapshot(
     snapshot_path: str,
     end_time: str,
     sim_start: Optional[str] = None,
+    trade_start: Optional[str] = None,
     initial_capital: float = 100000.0,
     fee_pct: float = 0.0,
     dp_lookback_override: Optional[int] = None,
@@ -1350,7 +1485,9 @@ def run_adaptive_reward_from_snapshot(
         sell_ret_th_live=float(bundle.get("sell_ret_th_live", 0.30)),
         sim_start=sim_start,
         verbose=verbose,
+        trade_start=trade_start,
         start_idx=five_i_start,
+        execution_engine_state=bundle.get("execution_engine_state"),
     )
 
     trades_df = phase2["trades_df"]
@@ -1383,7 +1520,7 @@ def run_adaptive_reward_from_snapshot(
     plt.plot(data["df_5m_idx"]["timestamp"], data["df_5m_idx"]["Close"], label="5m Close")
     if not trades_df.empty and "seen_idx" in trades_df.columns and "exec_px" in trades_df.columns:
         for _, tr in trades_df.iterrows():
-            idx = int(tr["seen_idx"])
+            idx = int(tr["exec_idx"]) if "exec_idx" in trades_df.columns and pd.notna(tr.get("exec_idx")) else int(tr["seen_idx"]) + 1
             if idx in data["df_5m_idx"].index:
                 t = pd.to_datetime(data["df_5m_idx"].loc[idx, "timestamp"])
                 px = float(tr["exec_px"])
@@ -1474,6 +1611,7 @@ def run_adaptive_reward_from_snapshot(
         dp_lookback=dp_lookback,
         static_buy_level=float(bundle.get("static_buy_level", 0.20)),
         static_sell_level=float(bundle.get("static_sell_level", 0.30)),
+        execution_engine_state=phase2["execution_engine_state"],
     )
     save_joblib(save_snapshot_path, continued_bundle)
 
@@ -1548,4 +1686,293 @@ def run_adaptive_reward_from_snapshot(
         "dp_lookback": int(dp_lookback),
         "daily_threshold_lookback_days": int(daily_threshold_config.lookback_days),
         "output_dir": output_dir,
+    }
+
+
+def run_adaptive_reward_realtime_from_checkpoint(
+    *,
+    checkpoint_path: str,
+    output_dir: str = "output_adaptive_reward_realtime",
+    end_time: Optional[str] = None,
+    initial_capital: float = 100000.0,
+    fee_pct: float = 0.0,
+    save_snapshot_path: Optional[str] = None,
+    autosave_year_start_checkpoints: bool = False,
+    dp_lookback_override: Optional[int] = None,
+    daily_threshold_lookback_days_override: Optional[int] = None,
+    trade_start: Optional[str] = None,
+    refresh_data: bool = True,
+    verbose: bool = True,
+) -> dict:
+    """
+    Resume the adaptive reward strategy from a saved checkpoint and advance it
+    with newly fetched market bars. This is a paper/live simulation helper: it
+    produces orders/trades from the strategy state but does not send broker orders.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    bundle = load_joblib(checkpoint_path)
+    if not isinstance(bundle, dict) or bundle.get("schema") != SNAPSHOT_SCHEMA:
+        raise ValueError(f"Unexpected checkpoint format in {checkpoint_path}")
+
+    code = str(bundle.get("code", "QQQ"))
+    snapshot_time = pd.to_datetime(bundle["snapshot_time"])
+    run_end = pd.to_datetime(end_time) if end_time is not None else pd.Timestamp.now()
+    if run_end <= snapshot_time:
+        raise ValueError(
+            f"Checkpoint snapshot_time {snapshot_time} is not before requested realtime end {run_end}. "
+            "Use a checkpoint from before the live period you want to simulate."
+        )
+
+    source_daily_csv = bundle["daily_csv_path"]
+    source_5m_csv = bundle["k5m_csv_path"]
+    realtime_daily_csv = os.path.join(output_dir, f"{code}_realtime_merged_DAY.csv")
+    realtime_5m_csv = os.path.join(output_dir, f"{code}_realtime_merged_5M.csv")
+
+    if refresh_data:
+        fetch_start = str((snapshot_time - pd.Timedelta(days=5)).date())
+        daily_bars = fetch_yfinance_ohlcv(code=code, start=fetch_start, end=str(run_end.date()), interval="1d")
+        five_bars = fetch_yfinance_ohlcv(code=code, start=fetch_start, end=str(run_end), interval="5m")
+        _merge_ohlcv_csv_with_new_bars(source_daily_csv, daily_bars, realtime_daily_csv)
+        _merge_ohlcv_csv_with_new_bars(source_5m_csv, five_bars, realtime_5m_csv)
+    else:
+        realtime_daily_csv = source_daily_csv
+        realtime_5m_csv = source_5m_csv
+
+    realtime_bundle = dict(bundle)
+    realtime_bundle["daily_csv_path"] = realtime_daily_csv
+    realtime_bundle["k5m_csv_path"] = realtime_5m_csv
+    source_macro_folder = os.path.dirname(os.path.abspath(source_daily_csv))
+    macro_files = copy.deepcopy(realtime_bundle.get("macro_files") or {"vix_": "VIX.csv"})
+    realtime_bundle["macro_files"] = {
+        pref: fn if os.path.isabs(str(fn)) else os.path.join(source_macro_folder, str(fn))
+        for pref, fn in macro_files.items()
+    }
+
+    bootstrap_checkpoint_path = os.path.join(output_dir, "realtime_bootstrap_checkpoint.joblib")
+    save_joblib(bootstrap_checkpoint_path, realtime_bundle)
+
+    if save_snapshot_path is None:
+        save_snapshot_path = os.path.join(output_dir, "realtime_final_checkpoint.joblib")
+
+    res = run_adaptive_reward_from_snapshot(
+        snapshot_path=bootstrap_checkpoint_path,
+        end_time=str(run_end),
+        sim_start=str((snapshot_time + pd.Timedelta(minutes=5))),
+        trade_start=trade_start,
+        initial_capital=initial_capital,
+        fee_pct=fee_pct,
+        dp_lookback_override=dp_lookback_override,
+        daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
+        output_dir=output_dir,
+        save_snapshot_path=save_snapshot_path,
+        autosave_year_start_checkpoints=autosave_year_start_checkpoints,
+        verbose=verbose,
+    )
+    res["input_checkpoint_path"] = checkpoint_path
+    res["realtime_bootstrap_checkpoint_path"] = bootstrap_checkpoint_path
+    res["realtime_daily_csv_path"] = realtime_daily_csv
+    res["realtime_5m_csv_path"] = realtime_5m_csv
+    res["realtime_end_time"] = run_end
+    return res
+
+
+def run_adaptive_reward_yfinance_intraday_loop(
+    *,
+    checkpoint_path: str,
+    output_dir: str = "output_adaptive_reward_yfinance_intraday",
+    initial_capital: float = 100000.0,
+    fee_pct: float = 0.0,
+    save_snapshot_path: Optional[str] = None,
+    autosave_year_start_checkpoints: bool = False,
+    dp_lookback_override: Optional[int] = None,
+    daily_threshold_lookback_days_override: Optional[int] = None,
+    poll_seconds: int = 60,
+    market_close_time: str = "16:00",
+    timezone: str = "America/New_York",
+    verbose: bool = True,
+) -> dict:
+    """
+    Run the realtime yfinance paper simulation through the current session.
+
+    First pass: advance from checkpoint_path through all Yahoo bars currently
+    available. Later passes: keep polling yfinance and resuming from the latest
+    saved checkpoint until the market close time.
+    """
+    import time
+
+    os.makedirs(output_dir, exist_ok=True)
+    if save_snapshot_path is None:
+        save_snapshot_path = os.path.join(output_dir, "live_checkpoint.joblib")
+
+    poll_seconds = max(1, int(poll_seconds))
+    current_checkpoint_path = checkpoint_path
+    results = []
+    seen_trade_keys = set()
+    latest_status = {
+        "last_trading_decision": None,
+        "equity": np.nan,
+        "cash": np.nan,
+        "pos": np.nan,
+        "date": None,
+        "buy_th": np.nan,
+        "sell_th": np.nan,
+        "p_day": np.nan,
+        "daily_action": None,
+        "daily_buy_level": np.nan,
+        "daily_sell_level": np.nan,
+    }
+
+    def ny_now() -> pd.Timestamp:
+        return pd.Timestamp.now(tz=timezone)
+
+    live_trade_start_ts = ny_now().tz_convert(None)
+
+    def today_close(now_ts: pd.Timestamp) -> pd.Timestamp:
+        hh, mm = [int(x) for x in str(market_close_time).split(":", 1)]
+        return now_ts.normalize() + pd.Timedelta(hours=hh, minutes=mm)
+
+    def print_new_trades(res: dict) -> None:
+        trades = res.get("trades_df")
+        if trades is None or trades.empty:
+            return
+        for _, tr in trades.iterrows():
+            key = (
+                str(tr.get("side", "")),
+                int(tr.get("seen_idx", -1)) if pd.notna(tr.get("seen_idx", np.nan)) else -1,
+                str(tr.get("ts", "")),
+            )
+            if key in seen_trade_keys:
+                continue
+            seen_trade_keys.add(key)
+            print(
+                "[LIVE TRADE] "
+                f"{tr.get('side')} seen_idx={tr.get('seen_idx')} "
+                f"exec_px={tr.get('exec_px')} reason={tr.get('reason')}"
+            )
+
+    def latest_live_status(res: dict) -> dict:
+        status = copy.deepcopy(latest_status)
+        daily_log = res.get("daily_log_df")
+        if daily_log is not None and not daily_log.empty:
+            row = daily_log.iloc[-1]
+            status.update(
+                {
+                    "date": row.get("date"),
+                    "equity": row.get("equity", np.nan),
+                    "cash": row.get("cash", np.nan),
+                    "pos": row.get("pos", np.nan),
+                    "buy_th": row.get("buy_th", np.nan),
+                    "sell_th": row.get("sell_th", np.nan),
+                    "p_day": row.get("p_day", np.nan),
+                    "daily_action": row.get("daily_action"),
+                    "daily_buy_level": row.get("daily_buy_level", np.nan),
+                    "daily_sell_level": row.get("daily_sell_level", np.nan),
+                }
+            )
+
+        trades = res.get("trades_df")
+        if trades is not None and not trades.empty:
+            tr = trades.iloc[-1].to_dict()
+            status["last_trading_decision"] = {
+                "side": tr.get("side"),
+                "seen_idx": tr.get("seen_idx"),
+                "exec_idx": tr.get("exec_idx"),
+                "exec_ts": tr.get("exec_ts"),
+                "exec_px": tr.get("exec_px"),
+                "qty": tr.get("qty"),
+                "fee": tr.get("fee"),
+                "reason": tr.get("reason"),
+                "signal_ts": tr.get("ts"),
+                "pred": tr.get("pred"),
+                "th": tr.get("th"),
+                "gate": tr.get("gate"),
+                "pnl": tr.get("pnl"),
+            }
+        return status
+
+    def print_live_status(status: dict) -> None:
+        decision = status.get("last_trading_decision")
+        print("[LIVE STATUS]")
+        print(
+            "  today's decision: "
+            f"date={status.get('date')} "
+            f"daily_action={status.get('daily_action')} "
+            f"p_day={status.get('p_day')} "
+            f"buy_level={status.get('daily_buy_level')} "
+            f"sell_level={status.get('daily_sell_level')}"
+        )
+        print(
+            "  account: "
+            f"date={status.get('date')} "
+            f"equity={status.get('equity')} "
+            f"cash={status.get('cash')} "
+            f"pos={status.get('pos')}"
+        )
+        print(
+            "  5m model: "
+            f"buy_th={status.get('buy_th')} "
+            f"sell_th={status.get('sell_th')}"
+        )
+        print(f"  last trading decision: {decision if decision is not None else 'None'}")
+
+    while True:
+        now_ts = ny_now()
+        close_ts = today_close(now_ts)
+        run_end_ts = min(now_ts, close_ts)
+
+        if verbose:
+            print(f"[LIVE] advancing through {run_end_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+        try:
+            res = run_adaptive_reward_realtime_from_checkpoint(
+                checkpoint_path=current_checkpoint_path,
+                output_dir=output_dir,
+                end_time=str(run_end_ts.tz_convert(None)),
+                initial_capital=initial_capital,
+                fee_pct=fee_pct,
+                save_snapshot_path=save_snapshot_path,
+                autosave_year_start_checkpoints=autosave_year_start_checkpoints,
+                dp_lookback_override=dp_lookback_override,
+                daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
+                trade_start=str(live_trade_start_ts),
+                refresh_data=True,
+                verbose=verbose,
+            )
+            results.append(res)
+            current_checkpoint_path = res["continued_snapshot_path"]
+            if verbose:
+                print(f"[LIVE] checkpoint -> {current_checkpoint_path}")
+            print_new_trades(res)
+            latest_status = latest_live_status(res)
+            print_live_status(latest_status)
+        except ValueError as exc:
+            msg = str(exc)
+            if "is not before requested realtime end" not in msg:
+                raise
+            if verbose:
+                print(f"[LIVE] no newer bars to process yet: {msg}")
+                print_live_status(latest_status)
+
+        now_ts = ny_now()
+        close_ts = today_close(now_ts)
+        if now_ts >= close_ts:
+            if verbose:
+                print(f"[LIVE] reached market close {close_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            break
+
+        sleep_for = min(poll_seconds, max(1, int((close_ts - now_ts).total_seconds())))
+        if verbose:
+            print(f"[LIVE] sleeping {sleep_for}s before next yfinance poll")
+        time.sleep(sleep_for)
+
+    last_res = results[-1] if results else {}
+    return {
+        "latest_checkpoint_path": current_checkpoint_path,
+        "save_snapshot_path": save_snapshot_path,
+        "results": results,
+        "last_result": last_res,
+        "latest_status": latest_status,
+        "last_trading_decision": latest_status.get("last_trading_decision"),
+        "trades_df": last_res.get("trades_df", pd.DataFrame()),
+        "daily_log_df": last_res.get("daily_log_df", pd.DataFrame()),
     }
