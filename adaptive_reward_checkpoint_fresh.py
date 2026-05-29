@@ -1337,6 +1337,7 @@ def run_adaptive_reward_from_snapshot(
     end_time: str,
     sim_start: Optional[str] = None,
     trade_start: Optional[str] = None,
+    reset_execution_state: bool = False,
     initial_capital: float = 100000.0,
     fee_pct: float = 0.0,
     dp_lookback_override: Optional[int] = None,
@@ -1487,7 +1488,7 @@ def run_adaptive_reward_from_snapshot(
         verbose=verbose,
         trade_start=trade_start,
         start_idx=five_i_start,
-        execution_engine_state=bundle.get("execution_engine_state"),
+        execution_engine_state=None if reset_execution_state else bundle.get("execution_engine_state"),
     )
 
     trades_df = phase2["trades_df"]
@@ -1701,6 +1702,7 @@ def run_adaptive_reward_realtime_from_checkpoint(
     dp_lookback_override: Optional[int] = None,
     daily_threshold_lookback_days_override: Optional[int] = None,
     trade_start: Optional[str] = None,
+    reset_execution_state: bool = False,
     refresh_data: bool = True,
     verbose: bool = True,
 ) -> dict:
@@ -1759,6 +1761,7 @@ def run_adaptive_reward_realtime_from_checkpoint(
         end_time=str(run_end),
         sim_start=str((snapshot_time + pd.Timedelta(minutes=5))),
         trade_start=trade_start,
+        reset_execution_state=reset_execution_state,
         initial_capital=initial_capital,
         fee_pct=fee_pct,
         dp_lookback_override=dp_lookback_override,
@@ -1786,6 +1789,7 @@ def run_adaptive_reward_yfinance_intraday_loop(
     autosave_year_start_checkpoints: bool = False,
     dp_lookback_override: Optional[int] = None,
     daily_threshold_lookback_days_override: Optional[int] = None,
+    reset_execution_state: bool = False,
     poll_seconds: int = 60,
     market_close_time: str = "16:00",
     timezone: str = "America/New_York",
@@ -1935,6 +1939,7 @@ def run_adaptive_reward_yfinance_intraday_loop(
                 dp_lookback_override=dp_lookback_override,
                 daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
                 trade_start=str(live_trade_start_ts),
+                reset_execution_state=bool(reset_execution_state and not results),
                 refresh_data=True,
                 verbose=verbose,
             )
@@ -1971,6 +1976,288 @@ def run_adaptive_reward_yfinance_intraday_loop(
         "save_snapshot_path": save_snapshot_path,
         "results": results,
         "last_result": last_res,
+        "latest_status": latest_status,
+        "last_trading_decision": latest_status.get("last_trading_decision"),
+        "trades_df": last_res.get("trades_df", pd.DataFrame()),
+        "daily_log_df": last_res.get("daily_log_df", pd.DataFrame()),
+    }
+
+
+def run_adaptive_reward_yfinance_scheduled_flat_start_loop(
+    *,
+    checkpoint_path: str,
+    output_dir: str = "output_adaptive_reward_next_monday_live",
+    start_date: str = "next_monday",
+    market_open_time: str = "09:30",
+    market_close_time: str = "16:00",
+    timezone: str = "America/New_York",
+    initial_capital: float = 100000.0,
+    fee_pct: float = 0.0,
+    save_snapshot_path: Optional[str] = None,
+    autosave_year_start_checkpoints: bool = False,
+    dp_lookback_override: Optional[int] = None,
+    daily_threshold_lookback_days_override: Optional[int] = None,
+    poll_seconds: int = 60,
+    preopen_update: bool = True,
+    wait_until_start: bool = True,
+    verbose: bool = True,
+) -> dict:
+    """
+    Update data, reset to a flat account, then run live from a scheduled market open.
+
+    Use this when you want the paper/live strategy to behave as if no position
+    exists before the start time. Historical and pre-start bars may update model
+    state, but only events at or after the scheduled open can create trades.
+    """
+    import time
+
+    def ny_now() -> pd.Timestamp:
+        return pd.Timestamp.now(tz=timezone)
+
+    def local_time_on_day(day_ts: pd.Timestamp, hhmm: str) -> pd.Timestamp:
+        hh, mm = [int(x) for x in str(hhmm).split(":", 1)]
+        return day_ts.normalize() + pd.Timedelta(hours=hh, minutes=mm)
+
+    def parse_start(now_ts: pd.Timestamp) -> pd.Timestamp:
+        if str(start_date).strip().lower() in {"next_monday", "monday"}:
+            days_ahead = (0 - int(now_ts.weekday())) % 7
+            if days_ahead == 0:
+                candidate_day = now_ts
+            else:
+                candidate_day = now_ts + pd.Timedelta(days=days_ahead)
+            candidate = local_time_on_day(candidate_day, market_open_time)
+            if candidate <= now_ts:
+                candidate = local_time_on_day(candidate + pd.Timedelta(days=7), market_open_time)
+            return candidate
+
+        raw = str(start_date).strip()
+        if len(raw) == 10 and raw.count("-") == 2:
+            raw = f"{raw} {market_open_time}"
+        ts = pd.to_datetime(raw)
+        if getattr(ts, "tzinfo", None) is None:
+            ts = ts.tz_localize(timezone)
+        else:
+            ts = ts.tz_convert(timezone)
+        return ts
+
+    def trade_start_str(ts: pd.Timestamp) -> str:
+        return str(ts.tz_convert(None))
+
+    def latest_live_status(res: dict, previous: Optional[dict] = None) -> dict:
+        status = copy.deepcopy(previous or {})
+        status.setdefault("last_trading_decision", None)
+        daily_log = res.get("daily_log_df")
+        if daily_log is not None and not daily_log.empty:
+            row = daily_log.iloc[-1]
+            status.update(
+                {
+                    "date": row.get("date"),
+                    "equity": row.get("equity", np.nan),
+                    "cash": row.get("cash", np.nan),
+                    "pos": row.get("pos", np.nan),
+                    "buy_th": row.get("buy_th", np.nan),
+                    "sell_th": row.get("sell_th", np.nan),
+                    "p_day": row.get("p_day", np.nan),
+                    "daily_action": row.get("daily_action"),
+                    "daily_buy_level": row.get("daily_buy_level", np.nan),
+                    "daily_sell_level": row.get("daily_sell_level", np.nan),
+                }
+            )
+
+        trades = res.get("trades_df")
+        if trades is not None and not trades.empty:
+            tr = trades.iloc[-1].to_dict()
+            status["last_trading_decision"] = {
+                "side": tr.get("side"),
+                "signal_ts": tr.get("ts"),
+                "exec_ts": tr.get("exec_ts"),
+                "exec_px": tr.get("exec_px"),
+                "qty": tr.get("qty"),
+                "reason": tr.get("reason"),
+                "pred": tr.get("pred"),
+                "th": tr.get("th"),
+                "gate": tr.get("gate"),
+            }
+        return status
+
+    def print_day_decision(status: dict) -> None:
+        print("[LIVE DAY DECISION]")
+        print(
+            "  "
+            f"date={status.get('date')} "
+            f"daily_action={status.get('daily_action')} "
+            f"p_day={status.get('p_day')} "
+            f"buy_level={status.get('daily_buy_level')} "
+            f"sell_level={status.get('daily_sell_level')}"
+        )
+        print(
+            "  "
+            f"account_start=cash_only initial_capital={initial_capital} "
+            f"buy_th_5m={status.get('buy_th')} sell_th_5m={status.get('sell_th')}"
+        )
+
+    def print_new_trades(res: dict, seen_trade_keys: set) -> None:
+        trades = res.get("trades_df")
+        if trades is None or trades.empty:
+            return
+        for _, tr in trades.iterrows():
+            key = (
+                str(tr.get("side", "")),
+                int(tr.get("seen_idx", -1)) if pd.notna(tr.get("seen_idx", np.nan)) else -1,
+                str(tr.get("ts", "")),
+            )
+            if key in seen_trade_keys:
+                continue
+            seen_trade_keys.add(key)
+            print(
+                "[LIVE TRADE] "
+                f"{str(tr.get('side')).upper()} "
+                f"signal_ts={tr.get('ts')} "
+                f"exec_ts={tr.get('exec_ts')} "
+                f"exec_px={tr.get('exec_px')} "
+                f"qty={tr.get('qty')} "
+                f"reason={tr.get('reason')}"
+            )
+
+    os.makedirs(output_dir, exist_ok=True)
+    if save_snapshot_path is None:
+        save_snapshot_path = os.path.join(output_dir, "live_checkpoint.joblib")
+
+    poll_seconds = max(1, int(poll_seconds))
+    start_ts = parse_start(ny_now())
+    close_ts = local_time_on_day(start_ts, market_close_time)
+    current_checkpoint_path = checkpoint_path
+    results = []
+    latest_status: dict = {"last_trading_decision": None}
+    seen_trade_keys = set()
+    reset_needed = True
+
+    if verbose:
+        print(
+            "[LIVE PLAN] "
+            f"scheduled_start={start_ts.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+            f"scheduled_close={close_ts.strftime('%Y-%m-%d %H:%M:%S %Z')} "
+            "starting_position=flat"
+        )
+
+    now_ts = ny_now()
+    if preopen_update and now_ts < start_ts:
+        if verbose:
+            print(f"[LIVE PREP] updating prior data through {now_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        try:
+            prep = run_adaptive_reward_realtime_from_checkpoint(
+                checkpoint_path=current_checkpoint_path,
+                output_dir=output_dir,
+                end_time=str(now_ts.tz_convert(None)),
+                initial_capital=initial_capital,
+                fee_pct=fee_pct,
+                save_snapshot_path=save_snapshot_path,
+                autosave_year_start_checkpoints=autosave_year_start_checkpoints,
+                dp_lookback_override=dp_lookback_override,
+                daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
+                trade_start=trade_start_str(start_ts),
+                reset_execution_state=True,
+                refresh_data=True,
+                verbose=verbose,
+            )
+            results.append(prep)
+            current_checkpoint_path = prep["continued_snapshot_path"]
+            latest_status = latest_live_status(prep, latest_status)
+            reset_needed = False
+            if verbose:
+                print(f"[LIVE PREP] flat checkpoint -> {current_checkpoint_path}")
+        except ValueError as exc:
+            if "is not before requested realtime end" not in str(exc):
+                raise
+            if verbose:
+                print(f"[LIVE PREP] checkpoint is already current enough: {exc}")
+
+    now_ts = ny_now()
+    if now_ts < start_ts:
+        if not wait_until_start:
+            if verbose:
+                print(f"[LIVE WAIT] start is {start_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}; returning before live loop")
+            return {
+                "status": "waiting_for_start",
+                "scheduled_start": start_ts,
+                "scheduled_close": close_ts,
+                "latest_checkpoint_path": current_checkpoint_path,
+                "save_snapshot_path": save_snapshot_path,
+                "results": results,
+                "latest_status": latest_status,
+                "trades_df": results[-1].get("trades_df", pd.DataFrame()) if results else pd.DataFrame(),
+                "daily_log_df": results[-1].get("daily_log_df", pd.DataFrame()) if results else pd.DataFrame(),
+            }
+
+        while now_ts < start_ts:
+            sleep_for = min(poll_seconds, max(1, int((start_ts - now_ts).total_seconds())))
+            if verbose:
+                print(f"[LIVE WAIT] sleeping {sleep_for}s until {start_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            time.sleep(sleep_for)
+            now_ts = ny_now()
+
+    printed_day_decision = False
+    while True:
+        now_ts = ny_now()
+        run_end_ts = min(now_ts, close_ts)
+        if run_end_ts < start_ts:
+            run_end_ts = start_ts
+
+        if verbose:
+            print(f"[LIVE] advancing through {run_end_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+        try:
+            res = run_adaptive_reward_realtime_from_checkpoint(
+                checkpoint_path=current_checkpoint_path,
+                output_dir=output_dir,
+                end_time=str(run_end_ts.tz_convert(None)),
+                initial_capital=initial_capital,
+                fee_pct=fee_pct,
+                save_snapshot_path=save_snapshot_path,
+                autosave_year_start_checkpoints=autosave_year_start_checkpoints,
+                dp_lookback_override=dp_lookback_override,
+                daily_threshold_lookback_days_override=daily_threshold_lookback_days_override,
+                trade_start=trade_start_str(start_ts),
+                reset_execution_state=reset_needed,
+                refresh_data=True,
+                verbose=verbose,
+            )
+            reset_needed = False
+            results.append(res)
+            current_checkpoint_path = res["continued_snapshot_path"]
+            latest_status = latest_live_status(res, latest_status)
+            if verbose:
+                print(f"[LIVE] checkpoint -> {current_checkpoint_path}")
+            if not printed_day_decision:
+                print_day_decision(latest_status)
+                printed_day_decision = True
+            print_new_trades(res, seen_trade_keys)
+        except ValueError as exc:
+            msg = str(exc)
+            if "is not before requested realtime end" not in msg:
+                raise
+            if verbose:
+                print(f"[LIVE] no newer bars to process yet: {msg}")
+
+        now_ts = ny_now()
+        if now_ts >= close_ts:
+            if verbose:
+                print(f"[LIVE] reached market close {close_ts.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            break
+
+        sleep_for = min(poll_seconds, max(1, int((close_ts - now_ts).total_seconds())))
+        if verbose:
+            print(f"[LIVE] sleeping {sleep_for}s before next yfinance poll")
+        time.sleep(sleep_for)
+
+    last_res = results[-1] if results else {}
+    return {
+        "status": "closed",
+        "scheduled_start": start_ts,
+        "scheduled_close": close_ts,
+        "latest_checkpoint_path": current_checkpoint_path,
+        "save_snapshot_path": save_snapshot_path,
+        "results": results,
         "latest_status": latest_status,
         "last_trading_decision": latest_status.get("last_trading_decision"),
         "trades_df": last_res.get("trades_df", pd.DataFrame()),
