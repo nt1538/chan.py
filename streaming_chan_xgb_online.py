@@ -14,6 +14,7 @@ from streaming_labels import StreamingBest24hLabeler
 
 
 def get_numeric_feature_columns(bsp_df: pd.DataFrame, target_col: str = "profit_target_pct") -> List[str]:
+    """Select numeric buy/sell point features while excluding labels and identifiers."""
     exclude = {
         "klu_idx",
         "profit_target_pct",
@@ -38,6 +39,7 @@ def get_numeric_feature_columns(bsp_df: pd.DataFrame, target_col: str = "profit_
 def calc_buy_hold_daily(csv_path: str,
                         start_time: str,
                         end_time: str) -> pd.DataFrame:
+    """Compute daily buy-and-hold returns over the requested CSV time range."""
     raw = pd.read_csv(csv_path)
     if 'timestamp' in raw.columns:
         raw['timestamp'] = pd.to_datetime(raw['timestamp'])
@@ -83,6 +85,7 @@ def run_streaming_chan_xgb_online(
     plot_results: bool = True,
     verbose: bool = True,
 ) -> Dict:
+    """Run the older online Chan/XGBoost streaming simulation over one CSV."""
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -157,6 +160,7 @@ def run_streaming_chan_xgb_online(
     per_side_fee = transaction_fee_pct
 
     def close_position(price, ts, force=False):
+        """Close the active long position and record realized PnL."""
         nonlocal cash, shares, entry_price, entry_time, all_trades
         if shares <= 0:
             return
@@ -186,6 +190,7 @@ def run_streaming_chan_xgb_online(
         entry_time = None
 
     def open_position(price, ts):
+        """Open a full-cash long position at the supplied execution price."""
         nonlocal cash, shares, entry_price, entry_time
         trade_cap = cash * position_size
         if trade_cap <= 0:
@@ -199,9 +204,11 @@ def run_streaming_chan_xgb_online(
         print(f"[TRADE] BUY confirmed at {ts} | close={price:.4f}")
 
     def on_day_finished(day):
+        """Record that a trading day has completed."""
         daily_results.append({"date": day})
 
     def train_models_if_possible(df_all: pd.DataFrame):
+        """Train/retrain buy and sell models once enough labeled BSP rows exist."""
         nonlocal feature_cols, buy_model, sell_model, buy_th, sell_th, model_ready, completed_days
 
         if len(completed_days) < train_days_for_model + threshold_days_for_selection:

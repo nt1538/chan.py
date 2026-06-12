@@ -23,6 +23,8 @@ from BuySellPoint.BS_Point import CBS_Point
 
 
 class ChanStreamer:
+    """Stream one K-line at a time through a sliding-window Chan calculator."""
+
     def __init__(
         self,
         code: str,
@@ -75,6 +77,7 @@ class ChanStreamer:
     # Data source helpers
     # ------------------------------------------------------------------
     def _get_stock_api(self):
+        """Resolve the configured data source enum to its API class."""
         if self.data_src == DATA_SRC.YAHOO_FINANCE:
             from DataAPI.YahooFinanceAPI import CYahooFinance
             return CYahooFinance
@@ -237,9 +240,11 @@ class ChanStreamer:
         return new_bsp_list
 
     def _create_bsp_snapshot(self, bsp: CBS_Point, bs_type_str: str, snapshot_idx: int) -> Dict:
+        """Flatten one Chan BSP object into a model-ready feature dictionary."""
         klu = bsp.klu
 
         def safe_get(obj, attr, default=0.0):
+            """Read optional BSP/K-line fields without failing on missing values."""
             try:
                 val = getattr(obj, attr, default)
                 return default if val is None else val
@@ -281,6 +286,7 @@ class ChanStreamer:
         return snap
 
     def _find_original_klu_idx(self, klu: CKLine_Unit) -> int:
+        """Map a window-local K-line back to its index in the full stream."""
         ts = str(klu.time)
         for idx, orig in enumerate(self.all_klines):
             if str(orig.time) == ts:
@@ -289,7 +295,9 @@ class ChanStreamer:
         return getattr(klu, "idx", -1)
 
     def _add_klu_indicators(self, snap: Dict, klu: CKLine_Unit):
+        """Attach technical indicators and current-bar price action to a BSP snapshot."""
         def safe_get(obj, attr, default=0.0):
+            """Read optional indicator attributes with a stable numeric fallback."""
             try:
                 val = getattr(obj, attr, default)
                 return default if val is None else val
@@ -358,6 +366,7 @@ class ChanStreamer:
         return lst
 
     def get_stats(self) -> Dict:
+        """Return lightweight counters for monitoring the streaming run."""
         return {
             "total_klines_loaded": len(self.all_klines),
             "snapshots_generated": self.snapshot_count,

@@ -18,6 +18,8 @@ from KLine.KLine_Unit import CKLine_Unit
 
 
 class CChan:
+    """Main Chan engine that loads K-lines, builds multi-level structures, and exposes BSPs."""
+
     def __init__(
         self,
         code,
@@ -28,6 +30,7 @@ class CChan:
         config=None,
         autype: AUTYPE = AUTYPE.QFQ,
     ):
+        """Initialize symbol, data source, levels, config, and optionally load all data."""
         if lv_list is None:
             lv_list = [KL_TYPE.K_DAY, KL_TYPE.K_60M]
         check_kltype_order(lv_list)  # lv_list顺序从高到低
@@ -58,6 +61,7 @@ class CChan:
 
 
     def __deepcopy__(self, memo):
+        """Deep-copy Chan state while restoring parent/child K-line references."""
         cls = self.__class__
         obj: CChan = cls.__new__(cls)
         memo[id(self)] = obj
@@ -88,27 +92,32 @@ class CChan:
         return obj
 
     def do_init(self):
+        """Reset all K-line containers for the configured levels."""
         self.kl_datas: Dict[KL_TYPE, CKLine_List] = {}
         for idx in range(len(self.lv_list)):
             self.kl_datas[self.lv_list[idx]] = CKLine_List(self.lv_list[idx], conf=self.conf)
 
     def load_stock_data(self, stockapi_instance: CCommonStockApi, lv) -> Iterable[CKLine_Unit]:
+        """Yield K-line units from a stock API while assigning indexes and level metadata."""
         for KLU_IDX, klu in enumerate(stockapi_instance.get_kl_data()):
             klu.set_idx(KLU_IDX)
             klu.kl_type = lv
             yield klu
 
     def get_load_stock_iter(self, stockapi_cls, lv):
+        """Create a stock API instance and return its K-line iterator."""
         stockapi_instance = stockapi_cls(code=self.code, k_type=lv, begin_date=self.begin_time, end_date=self.end_time, autype=self.autype)
         return self.load_stock_data(stockapi_instance, lv)
 
     def add_lv_iter(self, lv_idx, iter):
+        """Register a K-line iterator for one level."""
         if isinstance(lv_idx, int):
             self.g_kl_iter[self.lv_list[lv_idx]].append(iter)
         else:
             self.g_kl_iter[lv_idx].append(iter)
 
     def get_next_lv_klu(self, lv_idx):
+        """Read the next K-line from the iterator queue for one level."""
         if isinstance(lv_idx, int):
             lv_idx = self.lv_list[lv_idx]
         if len(self.g_kl_iter[lv_idx]) == 0:
@@ -173,6 +182,7 @@ class CChan:
             yield self
 
     def trigger_load(self, inp):
+        """Load externally supplied K-lines into Chan for sliding-window and streaming callers."""
         # {type: [klu, ...]}
         if not hasattr(self, 'klu_cache'):
             self.klu_cache: List[Optional[CKLine_Unit]] = [None for _ in self.lv_list]
@@ -194,6 +204,7 @@ class CChan:
                 self.kl_datas[lv].cal_seg_and_zs()
 
     def init_lv_klu_iter(self, stockapi_cls):
+        """Create data iterators for every configured level."""
         # 为了跳过一些获取数据失败的级别
         lv_klu_iter = []
         valid_lv_list = []
@@ -212,6 +223,7 @@ class CChan:
         return lv_klu_iter
 
     def GetStockAPI(self):
+        """Resolve the configured data source to the stock API class."""
         _dict = {}
         if self.data_src == DATA_SRC.BAO_STOCK:
             from DataAPI.BaoStockAPI import CBaoStock
@@ -241,6 +253,7 @@ class CChan:
         return eval(cls_name)
 
     def load(self, step=False):
+        """Load source data into Chan and yield snapshots in step mode."""
         stockapi_cls = self.GetStockAPI()
         try:
             stockapi_cls.do_init()
@@ -261,12 +274,14 @@ class CChan:
             raise CChanException("最高级别没有获得任何数据", ErrCode.NO_DATA)
 
     def set_klu_parent_relation(self, parent_klu, kline_unit, cur_lv, lv_idx):
+        """Link a lower-level K-line to its parent and validate dates when enabled."""
         if self.conf.kl_data_check and kltype_lte_day(cur_lv) and kltype_lte_day(self.lv_list[lv_idx-1]):
             self.check_kl_consitent(parent_klu, kline_unit)
         parent_klu.add_children(kline_unit)
         kline_unit.set_parent(parent_klu)
 
     def add_new_kl(self, cur_lv: KL_TYPE, kline_unit):
+        """Append one K-line to the level container with contextual error reporting."""
         try:
             self.kl_datas[cur_lv].add_single_klu(kline_unit)
         except Exception:
@@ -275,6 +290,7 @@ class CChan:
             raise
 
     def try_set_klu_idx(self, lv_idx: int, kline_unit: CKLine_Unit):
+        """Assign a sequential index when the data source did not provide one."""
         if kline_unit.idx >= 0:
             return
         if len(self[lv_idx]) == 0:
@@ -283,6 +299,7 @@ class CChan:
             kline_unit.set_idx(self[lv_idx][-1][-1].idx + 1)
 
     def load_iterator(self, lv_idx, parent_klu, step):
+        """Recursively load and align child K-lines under parent K-lines."""
         # K线时间天级别以下描述的是结束时间，如60M线，每天第一根是10点30的
         # 天以上是当天日期
         cur_lv = self.lv_list[lv_idx]
@@ -318,6 +335,7 @@ class CChan:
                 yield self
 
     def check_kl_consitent(self, parent_klu, sub_klu):
+        """Validate that day-or-higher parent and child K-lines share the same date."""
         if parent_klu.time.year != sub_klu.time.year or \
            parent_klu.time.month != sub_klu.time.month or \
            parent_klu.time.day != sub_klu.time.day:
@@ -328,6 +346,7 @@ class CChan:
                 raise CChanException(f"父&子级别K线时间不一致条数超过{self.conf.max_kl_inconsistent_cnt}！！", ErrCode.KL_TIME_INCONSISTENT)
 
     def check_kl_align(self, kline_unit, lv_idx):
+        """Validate that a parent K-line has at least one child K-line."""
         if self.conf.kl_data_check and len(kline_unit.sub_kl_list) == 0:
             self.kl_misalign_cnt += 1
             if self.conf.print_warning:
@@ -336,6 +355,7 @@ class CChan:
                 raise CChanException(f"在次级别找不到K线条数超过{self.conf.max_kl_misalgin_cnt}！！", ErrCode.KL_DATA_NOT_ALIGN)
 
     def __getitem__(self, n) -> CKLine_List:
+        """Return a K-line container by KL_TYPE or level index."""
         if isinstance(n, KL_TYPE):
             return self.kl_datas[n]
         elif isinstance(n, int):
@@ -344,12 +364,14 @@ class CChan:
             raise CChanException("unspoourt query type", ErrCode.COMMON_ERROR)
 
     def get_bsp(self, idx=None) -> List[CBS_Point]:
+        """Return sorted buy/sell points for one level or the single configured level."""
         if idx is not None:
             return self[idx].bs_point_lst.getSortedBspList()
         assert len(self.lv_list) == 1
         return self[0].bs_point_lst.getSortedBspList()
 
     def chan_dump_pickle(self, file_path):
+        """Serialize Chan state after removing deep linked-list references."""
         _pre_limit = sys.getrecursionlimit()
         sys.setrecursionlimit(0x100000)
         for kl_list in self.kl_datas.values():
@@ -377,6 +399,7 @@ class CChan:
 
     @staticmethod
     def chan_load_pickle(file_path) -> 'CChan':
+        """Load a pickled Chan object and rebuild linked-list references."""
         with open(file_path, "rb") as f:
             chan = pickle.load(f)
         last_klu = None

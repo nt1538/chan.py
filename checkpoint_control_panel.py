@@ -9,6 +9,7 @@ from typing import Optional
 
 @dataclass
 class ResumeConfig:
+    """User-selected settings for resuming a saved strategy checkpoint."""
     checkpoint_path: str
     daily_csv_path: str
     k5m_csv_path: str
@@ -22,6 +23,7 @@ class ResumeConfig:
 
 @dataclass
 class FreshRunConfig:
+    """User-selected settings for starting a new daily/5m pipeline run."""
     daily_csv_path: str
     k5m_csv_path: str
     code: str
@@ -41,20 +43,24 @@ class FreshRunConfig:
 
 
 def list_checkpoints(base_dir: Path) -> list[Path]:
+    """Return checkpoint files sorted by most recently modified first."""
     return sorted(base_dir.rglob("*.joblib"), key=lambda p: p.stat().st_mtime, reverse=True)
 
 
 def default_output_dir(prefix: str = "output_control_panel") -> str:
+    """Build a timestamped output directory for a Streamlit-triggered run."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return str(Path(prefix) / ts)
 
 
 def export_run_config(config: dict, target_path: Path):
+    """Write a selected run configuration to JSON for reproducibility."""
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def render_command_preview(resume: Optional[ResumeConfig], fresh: Optional[FreshRunConfig]) -> str:
+    """Render a copyable Python call preview for the selected control-panel mode."""
     if resume is not None:
         data = asdict(resume)
         return (
@@ -98,6 +104,7 @@ def render_command_preview(resume: Optional[ResumeConfig], fresh: Optional[Fresh
 
 
 def main():
+    """Launch the Streamlit checkpoint browser and run-configuration UI."""
     try:
         import streamlit as st
     except ImportError as exc:

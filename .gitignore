@@ -9,3 +9,9 @@ OpenConfig.yaml
 gotify_push.py
 cos_config.yaml
 qlib-env/
+
+# Generated market data update folders
+DataAPI/data/index_update_month_1day_qjk5ivq/
+DataAPI/data/etf_update_month_1day_adjsplit_qmigryf/
+DataAPI/data/etf_update_month_5min_adjsplit_fnso3dw/
+DataAPI/data/index_update_month_5min_qjk5ivq/

@@ -19,6 +19,7 @@ class StreamingBest24hLabeler:
     """
 
     def __init__(self, time_window_bars: int):
+        """Create an incremental labeler with a fixed forward evaluation window."""
         self.time_window_bars = time_window_bars
 
         # All BSP dicts in time order

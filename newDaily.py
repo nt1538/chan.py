@@ -32,6 +32,7 @@ try:
     from Common.CEnum import DATA_SRC
 except Exception:
     class DATA_SRC:
+        """Fallback enum shim used when Common.CEnum.DATA_SRC is unavailable."""
         CSV = "CSV"
 from KLine.KLine_Unit import CKLine_Unit
 from Common.CTime import CTime
@@ -41,6 +42,7 @@ from Common.CTime import CTime
 # 1) CSV loader + kline features (same as your style)
 # ============================================================
 def _pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """Return the first matching column name, case-insensitive as a fallback."""
     cols = list(df.columns)
     for c in candidates:
         if c in cols:
@@ -52,6 +54,7 @@ def _pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     return None
 
 def load_daily_csv(daily_csv_path: str) -> pd.DataFrame:
+    """Load a daily OHLCV CSV and normalize core price columns."""
     df = pd.read_csv(daily_csv_path)
 
     ts_col = _pick_col(df, ["timestamp", "date", "datetime", "time"])
@@ -86,6 +89,7 @@ def load_daily_csv(daily_csv_path: str) -> pd.DataFrame:
     return df
 
 def _safe_div(a, b, eps=1e-12):
+    """Divide with a small epsilon to avoid zero-denominator errors."""
     return a / (b + eps)
 
 KLINE_KEYS = [
@@ -97,6 +101,7 @@ KLINE_KEYS = [
 ]
 
 def compute_kline_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute daily return, volatility, range, moving-average, and slope features."""
     d = df.copy().sort_values("timestamp").reset_index(drop=True)
 
     o = d["_open"].astype(float)
@@ -127,6 +132,7 @@ def compute_kline_features(df: pd.DataFrame) -> pd.DataFrame:
         d[f"above_ma_{w}"] = (_safe_div(c, ma) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     def _slope_log(x):
+        """Estimate log-price slope over a rolling window."""
         x = np.asarray(x, dtype=float)
         x = np.log(np.maximum(x, 1e-12))
         t = np.arange(len(x), dtype=float)
@@ -139,6 +145,7 @@ def compute_kline_features(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 def make_kline_dict(kline_row: pd.Series, prefix: str) -> Dict[str, float]:
+    """Convert one feature row into a prefixed model feature dictionary."""
     out = {}
     for k in KLINE_KEYS:
         val = kline_row[k] if k in kline_row.index else 0.0
@@ -150,6 +157,7 @@ def make_kline_dict(kline_row: pd.Series, prefix: str) -> Dict[str, float]:
 # 2) Macro features loader (daily)
 # ============================================================
 def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: str) -> pd.DataFrame:
+    """Load macro index CSVs and align their prefixed daily features by date."""
     out = None
     for pref, fn in files.items():
         path = os.path.join(folder, fn)
@@ -173,6 +181,7 @@ def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: s
 # 3) DAILY CHAN BSP extraction + structure features
 # ============================================================
 def to_ctime(ts) -> CTime:
+    """Convert pandas-compatible timestamps into Chan CTime values."""
     dt = pd.to_datetime(ts).to_pydatetime()
     try:
         return CTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second, auto=False)
@@ -180,6 +189,7 @@ def to_ctime(ts) -> CTime:
         return CTime(dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
 
 def build_klu(ts, o, h, l, c, v=0.0) -> CKLine_Unit:
+    """Build a Chan K-line unit from daily OHLCV values."""
     ct = to_ctime(ts)
     kl_dict = {
         DATA_FIELD.FIELD_TIME: ct,
@@ -200,6 +210,7 @@ def build_klu(ts, o, h, l, c, v=0.0) -> CKLine_Unit:
     return klu
 
 def normalize_bsp_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize BSP row direction/type fields for downstream feature code."""
     rr = dict(r)
     if "direction" not in rr or rr["direction"] is None:
         if rr.get("is_buy", None) is not None:
@@ -214,6 +225,7 @@ def normalize_bsp_row(r: Dict[str, Any]) -> Dict[str, Any]:
     return rr
 
 def extract_bsp_rows_from_chan(chan_obj) -> List[Dict[str, Any]]:
+    """Read newly exported BSP snapshots from a sliding-window Chan object."""
     if hasattr(chan_obj, "export_new_historical_bsp_to_list"):
         out = chan_obj.export_new_historical_bsp_to_list()
         return out if out else []
@@ -223,6 +235,7 @@ def extract_bsp_rows_from_chan(chan_obj) -> List[Dict[str, Any]]:
     return []
 
 def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse consecutive same-direction BSPs into alternating chain endpoints."""
     if not bsp_rows:
         return []
     bsps = sorted(bsp_rows, key=lambda r: pd.to_datetime(r["timestamp"]))
@@ -241,6 +254,7 @@ def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, An
     return ends
 
 def regime_for_day(day_norm: pd.Timestamp, ends: List[Dict[str, Any]]) -> str:
+    """Infer up/down/unknown regime from neighboring BSP chain endpoints."""
     if len(ends) < 2:
         return "unknown"
     for k in range(len(ends) - 1):
@@ -253,6 +267,7 @@ def regime_for_day(day_norm: pd.Timestamp, ends: List[Dict[str, Any]]) -> str:
     return "unknown"
 
 def bsp_context_features(bsp_rows: List[Dict[str, Any]], cur_ts: pd.Timestamp, window_days: int = 60) -> Dict[str, float]:
+    """Summarize recent BSP density, direction, and alternation context."""
     past = [r for r in bsp_rows if pd.to_datetime(r["timestamp"]) <= cur_ts]
     past = sorted(past, key=lambda x: pd.to_datetime(x["timestamp"]))
     if not past:
@@ -309,6 +324,7 @@ def label_instability_for_day(
     rv_quantile: float = 0.80,     # or future vol is >= recent history top 20%
     rv_ref_lookback: int = 252,
 ) -> Optional[int]:
+    """Label whether the next N days contain drawdown or volatility instability."""
     if N <= 0 or day_idx + N >= len(df_feat):
         return None
 
@@ -343,6 +359,7 @@ def label_instability_for_day(
 # 5) Model (LR + calibration)
 # ============================================================
 def fit_prob_model_dicts(X_dicts: List[Dict[str, float]], y: np.ndarray):
+    """Fit the daily instability probability model with calibration when possible."""
     base = Pipeline([
         ("vec", DictVectorizer(sparse=True)),
         ("scaler", MaxAbsScaler()),
@@ -372,6 +389,7 @@ def fit_prob_model_dicts(X_dicts: List[Dict[str, float]], y: np.ndarray):
         return base
 
 def predict_prob(model, X_dicts: List[Dict[str, float]]) -> np.ndarray:
+    """Predict class-1 probabilities for dictionary-based feature rows."""
     return model.predict_proba(X_dicts)[:, 1]
 
 
@@ -385,6 +403,7 @@ def make_daily_features_unified(
     bsp_rows_up_to_day: List[Dict[str, Any]],
     regime: str,
 ) -> Dict[str, float]:
+    """Build one pooled daily feature dictionary from asset, macro, BSP, and regime inputs."""
     feats: Dict[str, float] = {}
 
     feats.update(make_kline_dict(asset_row, prefix="d_"))
@@ -413,6 +432,7 @@ def make_daily_features_unified(
 # 7) Gate state machine (3 states + hysteresis)
 # ============================================================
 class GateState:
+    """String constants for the daily risk gate state machine."""
     HOLD = "HOLD"
     FREE = "FREE"
     RISK_OFF = "RISK_OFF"
@@ -425,6 +445,7 @@ def next_gate_state_with_hysteresis(
     p_high_enter: float,
     p_high_exit: float,
 ) -> str:
+    """Advance the daily gate state using low/high thresholds and hysteresis bands."""
     if not np.isfinite(p):
         return cur_state
 
@@ -452,6 +473,7 @@ def next_gate_state_with_hysteresis(
 
 @dataclass
 class OnlineState:
+    """Mutable walk-forward model state shared by the pooled runner."""
     model: Optional[Any] = None
     new_labels: int = 0
     trained_n: int = 0
@@ -491,6 +513,7 @@ def run_unified_daily_gate_with_daily_chan_bsp_pooled(
     daily_chan_max_klines: int = 800,
     verbose: bool = True,
 ):
+    """Run pooled SPY/QQQ daily instability modeling and gate-based trading simulation."""
     if macro_files is None:
         macro_files = {
             "vix_":   "VIX.csv",
@@ -593,6 +616,7 @@ def run_unified_daily_gate_with_daily_chan_bsp_pooled(
         y_label[sym] = y
 
     def maybe_train():
+        """Retrain the pooled daily model once enough delayed labels are available."""
         if len(y_all) < int(min_labeled_days_to_train):
             return
         if st.model is None or st.new_labels >= int(retrain_every_new_labels):
@@ -708,6 +732,7 @@ def run_unified_daily_gate_with_daily_chan_bsp_pooled(
 
         # trading sim: HOLD ensure long, RISK_OFF ensure flat, FREE no action
         def exec_price(i: int) -> float:
+            """Return the configured execution price for a daily signal index."""
             if trade_at == "close":
                 return float(df.loc[i, "_close"])
             if i + 1 >= len(df):

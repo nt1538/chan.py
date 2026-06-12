@@ -9,6 +9,7 @@ import pandas as pd
 
 
 def _safe_float(x: object, default: float = 0.0) -> float:
+    """Return a finite float, or a fallback when notebook/log data is missing or dirty."""
     try:
         v = float(x)
     except Exception:
@@ -19,11 +20,13 @@ def _safe_float(x: object, default: float = 0.0) -> float:
 
 
 def _safe_div(a: float, b: float, eps: float = 1e-12) -> float:
+    """Division helper that avoids zero-division in reward/state calculations."""
     return float(a) / (float(b) + eps)
 
 
 @dataclass
 class AdaptiveThresholdResult:
+    """Result object returned by daily threshold optimizers."""
     buy_level: float
     sell_level: float
     gate: str
@@ -33,15 +36,18 @@ class AdaptiveThresholdResult:
 
 @dataclass
 class RollingThresholdConfig:
+    """Configuration for grid-searching daily buy/sell probability thresholds."""
     lookback_days: int = 60
     buy_grid: Sequence[float] = field(default_factory=lambda: np.round(np.arange(0.05, 0.46, 0.01), 4).tolist())
     sell_grid: Sequence[float] = field(default_factory=lambda: np.round(np.arange(0.15, 0.76, 0.01), 4).tolist())
     min_gap: float = 0.05
+    max_gap: Optional[float] = None
     min_obs: int = 20
     switch_penalty: float = 0.0
 
 
 def gate_from_levels(p_day: float, buy_level: float, sell_level: float) -> str:
+    """Map the daily model probability into FORCE_BUY, FREE, FORCE_SELL, or NO_P."""
     if not np.isfinite(p_day):
         return "NO_P"
     if p_day >= sell_level:
@@ -52,15 +58,26 @@ def gate_from_levels(p_day: float, buy_level: float, sell_level: float) -> str:
 
 
 def reward_columns_available(df: pd.DataFrame) -> bool:
+    """Check whether exact daily reward columns are present."""
     needed = {"reward_force_buy", "reward_free", "reward_force_sell"}
     return needed.issubset(df.columns)
 
 
 def make_threshold_grid(start: float, end: float, step: float) -> list[float]:
+    """Build a rounded inclusive grid for daily probability thresholds."""
     if step <= 0:
         raise ValueError("step must be positive")
     n = int(np.floor((end - start) / step)) + 1
     return np.round(np.linspace(start, start + step * (n - 1), n), 6).tolist()
+
+
+def make_ret_grid(start: float = -0.5, end: float = 2.5, step: float = 0.005) -> List[float]:
+    """Build an inclusive grid for 5m return thresholds used by notebook experiments."""
+    # Convenience helper for notebook callers that need to test legacy or custom 5m return thresholds.
+    if step <= 0:
+        raise ValueError("step must be positive")
+    vals = np.arange(float(start), float(end) + 1e-12, float(step), dtype=float)
+    return [float(x) for x in vals]
 
 
 def build_proxy_reward_frame(df: pd.DataFrame, next_day_ret_col: str = "next_day_return") -> pd.DataFrame:
@@ -113,12 +130,45 @@ def build_equity_proxy_reward_frame(df: pd.DataFrame, equity_col: str = "equity"
     return out
 
 
+def _daily_history_rows(hist_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Keep threshold fitting at daily granularity.
+
+    Live polling can append more than one reward snapshot for the same trading
+    date before the final checkpoint is saved. The threshold optimizer expects
+    one row per day, so collapse duplicates before taking the rolling window.
+    """
+    if hist_df.empty or "date" not in hist_df.columns:
+        return hist_df
+
+    hist = hist_df.copy()
+    hist["_threshold_date"] = pd.to_datetime(hist["date"], errors="coerce").dt.normalize()
+    valid = hist["_threshold_date"].notna()
+    if not valid.any():
+        return hist_df
+
+    no_date = hist[~valid].drop(columns=["_threshold_date"])
+    dated = hist[valid].copy()
+    dated["_source_order"] = np.arange(len(dated))
+    dated = (
+        dated.sort_values(["_threshold_date", "_source_order"])
+        .drop_duplicates("_threshold_date", keep="last")
+        .drop(columns=["_threshold_date", "_source_order"])
+    )
+    if no_date.empty:
+        return dated.reset_index(drop=True)
+    return pd.concat([no_date, dated], ignore_index=True)
+
+
 def score_threshold_pair(
     hist_df: pd.DataFrame,
     buy_level: float,
     sell_level: float,
     switch_penalty: float = 0.0,
 ) -> float:
+    """Score one daily threshold pair by replaying its historical gate decisions."""
+    # Simulate what the daily gate would have chosen for each historical p_day,
+    # then score that threshold pair by the realized reward of those choices.
     actions = hist_df["p_day"].apply(lambda p: gate_from_levels(_safe_float(p, np.nan), buy_level, sell_level))
     rewards = np.where(
         actions == "FORCE_BUY",
@@ -138,6 +188,7 @@ def score_threshold_pair(
 
 
 def classify_best_action_from_rewards(hist_df: pd.DataFrame) -> pd.Series:
+    """Label each historical day with the best ex-post gate by realized reward."""
     rewards = hist_df[["reward_force_buy", "reward_free", "reward_force_sell"]].copy()
     col_to_action = {
         "reward_force_buy": "FORCE_BUY",
@@ -152,6 +203,7 @@ def threshold_confusion_score(
     buy_level: float,
     sell_level: float,
 ) -> dict:
+    """Measure how often a threshold pair matches the ex-post best daily gate."""
     predicted = hist_df["p_day"].apply(lambda p: gate_from_levels(_safe_float(p, np.nan), buy_level, sell_level))
     best = classify_best_action_from_rewards(hist_df)
     correct = (predicted == best)
@@ -208,7 +260,7 @@ def select_moving_daily_thresholds(
     else:
         hist = hist.reset_index(drop=True)
 
-    hist = hist.tail(int(config.lookback_days)).copy()
+    hist = _daily_history_rows(hist).tail(int(config.lookback_days)).copy()
     hist["p_day"] = pd.to_numeric(hist["p_day"], errors="coerce")
     hist = hist[np.isfinite(hist["p_day"])].copy()
     if len(hist) < int(config.min_obs):
@@ -224,8 +276,12 @@ def select_moving_daily_thresholds(
 
     best_score = -np.inf
     best_pair = (_safe_float(prev_buy_level, 0.20), _safe_float(prev_sell_level, 0.30))
+    max_gap = getattr(config, "max_gap", None)
     for buy_level, sell_level in product(config.buy_grid, config.sell_grid):
-        if sell_level - buy_level < float(config.min_gap):
+        gap = float(sell_level) - float(buy_level)
+        if gap < float(config.min_gap):
+            continue
+        if max_gap is not None and gap > float(max_gap):
             continue
         score = score_threshold_pair(
             hist_df=hist,
@@ -300,7 +356,9 @@ def select_oracle_thresholds_from_daily_rewards(
     else:
         hist = hist.reset_index(drop=True)
 
-    hist = hist.tail(int(config.lookback_days)).copy()
+    # Use one row per day and only the configured rolling lookback so live polling
+    # does not let duplicate intraday snapshots overweight one trading day.
+    hist = _daily_history_rows(hist).tail(int(config.lookback_days)).copy()
     hist["p_day"] = pd.to_numeric(hist["p_day"], errors="coerce")
     hist = hist[np.isfinite(hist["p_day"])].copy()
 
@@ -317,10 +375,16 @@ def select_oracle_thresholds_from_daily_rewards(
 
     best_score = -np.inf
     best_pair = (_safe_float(prev_buy_level, 0.20), _safe_float(prev_sell_level, 0.30))
+    # Grid search the daily probability thresholds. The selected pair maps the
+    # latest p_day into FORCE_BUY, FREE, or FORCE_SELL.
+    max_gap = getattr(config, "max_gap", None)
     for buy_level, sell_level in product(config.buy_grid, config.sell_grid):
         buy_level = float(buy_level)
         sell_level = float(sell_level)
-        if sell_level - buy_level < float(config.min_gap):
+        gap = sell_level - buy_level
+        if gap < float(config.min_gap):
+            continue
+        if max_gap is not None and gap > float(max_gap):
             continue
 
         if objective == "accuracy":
@@ -349,6 +413,7 @@ def select_oracle_thresholds_from_daily_rewards(
 
 @dataclass
 class ThresholdPairBanditConfig:
+    """Configuration for contextual bandit experiments over fixed threshold pairs."""
     threshold_pairs: Sequence[tuple[float, float]] = field(
         default_factory=lambda: [
             (0.10, 0.25),
@@ -373,6 +438,7 @@ class ThresholdPairBandit:
     """
 
     def __init__(self, n_features: int, config: Optional[ThresholdPairBanditConfig] = None):
+        """Initialize one linear-UCB state per candidate threshold pair."""
         config = config or ThresholdPairBanditConfig()
         self.config = config
         self.threshold_pairs: List[tuple[float, float]] = [
@@ -387,6 +453,7 @@ class ThresholdPairBandit:
         self.b = [np.zeros(self.n_features, dtype=float) for _ in self.threshold_pairs]
 
     def select_pair(self, x: np.ndarray) -> tuple[int, tuple[float, float]]:
+        """Choose the threshold pair with the highest optimistic linear score."""
         x = np.asarray(x, dtype=float).reshape(-1)
         if x.shape[0] != self.n_features:
             raise ValueError(f"Expected feature vector length {self.n_features}, got {x.shape[0]}.")
@@ -405,6 +472,7 @@ class ThresholdPairBandit:
         return best_idx, self.threshold_pairs[best_idx]
 
     def decide_gate(self, x: np.ndarray, p_day: float) -> dict:
+        """Select a threshold pair and convert p_day into the corresponding daily gate."""
         action_idx, (buy_level, sell_level) = self.select_pair(x)
         gate = gate_from_levels(p_day, buy_level, sell_level)
         return {
@@ -416,6 +484,7 @@ class ThresholdPairBandit:
         }
 
     def update(self, action_idx: int, x: np.ndarray, reward: float):
+        """Update the selected threshold pair with the realized reward."""
         x = np.asarray(x, dtype=float).reshape(-1)
         a = int(action_idx)
         self.A[a] += np.outer(x, x)
@@ -423,6 +492,7 @@ class ThresholdPairBandit:
 
 
 def realized_reward_for_gate(row: pd.Series, gate: str) -> float:
+    """Read the realized reward for a chosen daily gate from one reward row."""
     if gate == "FORCE_BUY":
         return _safe_float(row.get("reward_force_buy", 0.0), 0.0)
     if gate == "FORCE_SELL":
@@ -582,6 +652,7 @@ def build_threshold_bandit_reward(
     free_reward: float,
     force_sell_reward: float,
 ) -> float:
+    """Return the reward value corresponding to one selected gate."""
     if gate == "FORCE_BUY":
         return float(force_buy_reward)
     if gate == "FORCE_SELL":
@@ -597,6 +668,7 @@ def make_daily_threshold_state(
     drawdown_rel: float = 0.0,
     current_pos: int = 0,
 ) -> np.ndarray:
+    """Pack daily context features into the vector expected by ThresholdPairBandit."""
     return np.array(
         [
             _safe_float(p_day, 0.5),
@@ -612,6 +684,7 @@ def make_daily_threshold_state(
 
 @dataclass
 class NewsShockDecision:
+    """Output from the rule-based breaking-news guard."""
     action: str
     halt_trading: bool
     hold_minutes: int
@@ -620,6 +693,7 @@ class NewsShockDecision:
 
 @dataclass
 class NewsShockConfig:
+    """Trigger levels for the placeholder breaking-news risk guard."""
     high_impact_threshold: float = 0.85
     directional_threshold: float = 0.40
     halt_minutes: int = 180
@@ -643,9 +717,11 @@ class NewsShockGuard:
     """
 
     def __init__(self, config: Optional[NewsShockConfig] = None):
+        """Store the news-shock trigger configuration."""
         self.config = config or NewsShockConfig()
 
     def decide(self, latest_event: Optional[dict]) -> NewsShockDecision:
+        """Convert a parsed high-impact news event into a risk override decision."""
         if not latest_event:
             return NewsShockDecision("NO_OVERRIDE", False, 0, "no event")
 

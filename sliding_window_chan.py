@@ -155,6 +155,7 @@ class SlidingWindowChan:
     def _add_klu_indicators(self, snapshot: Dict, klu: CKLine_Unit):
         """Add technical indicators from K-line to snapshot."""
         def safe_get(obj, attr, default=0.0):
+            """Read optional indicator attributes without breaking snapshot export."""
             try:
                 val = getattr(obj, attr, default)
                 return default if val is None else val
@@ -212,6 +213,7 @@ class SlidingWindowChan:
         klu = bsp.klu
         
         def safe_get(obj, attr, default=0.0):
+            """Read optional BSP/K-line attributes with a stable default."""
             try:
                 val = getattr(obj, attr, default)
                 return default if val is None else val

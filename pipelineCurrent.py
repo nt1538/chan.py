@@ -10,6 +10,7 @@
 import os
 import copy
 import joblib
+import tempfile
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -33,6 +34,7 @@ try:
     from Common.CEnum import DATA_SRC
 except Exception:
     class DATA_SRC:
+        """Fallback DATA_SRC enum shim used when Common.CEnum.DATA_SRC is unavailable."""
         CSV = "CSV"
 from KLine.KLine_Unit import CKLine_Unit
 from Common.CTime import CTime
@@ -44,11 +46,13 @@ from Common.CTime import CTime
 
 @dataclass
 class RetModelPack:
+    """Container for a fitted 5m return model and the feature column order it expects."""
     feature_cols: List[str]
     model_ret: xgb.XGBRegressor
 
 @dataclass
 class DailyProbState:
+    """Mutable training state for the daily probability classifier."""
     model: Optional[Any] = None
     new_labels: int = 0
     trained_n: int = 0
@@ -59,6 +63,7 @@ class DailyProbState:
 # ============================================================
 
 class BanditAction:
+    """Integer action labels for the legacy daily gate bandit."""
     FORCE_BUY = 0
     FREE = 1
     FORCE_SELL = 2
@@ -79,6 +84,7 @@ class LinUCBBandit:
     score_a = theta_a^T x + alpha * sqrt(x^T A_a^-1 x)
     """
     def __init__(self, n_actions: int, n_features: int, alpha: float = 0.75, l2: float = 1.0):
+        """Initialize one linear-UCB model per daily gate action."""
         self.n_actions = int(n_actions)
         self.n_features = int(n_features)
         self.alpha = float(alpha)
@@ -88,6 +94,7 @@ class LinUCBBandit:
         self.b = [np.zeros(self.n_features, dtype=float) for _ in range(self.n_actions)]
 
     def select_action(self, x: np.ndarray) -> int:
+        """Choose the daily gate action with the highest optimistic score."""
         x = np.asarray(x, dtype=float).reshape(-1)
         scores = []
         for a in range(self.n_actions):
@@ -99,6 +106,7 @@ class LinUCBBandit:
         return int(np.argmax(scores))
 
     def update(self, action: int, x: np.ndarray, reward: float):
+        """Update the selected action model with its realized reward."""
         x = np.asarray(x, dtype=float).reshape(-1)
         a = int(action)
         r = float(reward)
@@ -106,6 +114,7 @@ class LinUCBBandit:
         self.b[a] += r * x
 
     def state_dict(self) -> dict:
+        """Serialize the bandit state for checkpoints."""
         return {
             "n_actions": self.n_actions,
             "n_features": self.n_features,
@@ -117,6 +126,7 @@ class LinUCBBandit:
 
     @classmethod
     def from_state_dict(cls, d: dict):
+        """Restore a LinUCBBandit from checkpoint state."""
         obj = cls(
             n_actions=int(d["n_actions"]),
             n_features=int(d["n_features"]),
@@ -133,9 +143,11 @@ class LinUCBBandit:
 # ============================================================
 
 def _safe_div(a, b, eps=1e-12):
+    """Divide while avoiding zero denominators in feature calculations."""
     return a / (b + eps)
 
 def _pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """Find a column by trying several case-insensitive candidate names."""
     cols = list(df.columns)
     for c in candidates:
         if c in cols:
@@ -147,13 +159,45 @@ def _pick_col(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     return None
 
 def save_joblib(path: str, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    joblib.dump(obj, path, compress=3)
+    """Save a joblib object with Windows-safe path normalization and atomic replace."""
+    raw_path = os.fspath(path)
+    if not raw_path or not raw_path.strip():
+        raise ValueError("save_joblib requires a non-empty path")
+
+    final_path = os.path.abspath(os.path.normpath(raw_path))
+    parent_dir = os.path.dirname(final_path) or os.getcwd()
+    os.makedirs(parent_dir, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=f".{os.path.basename(final_path)}.",
+        suffix=".tmp",
+        dir=parent_dir,
+    )
+    os.close(fd)
+    try:
+        try:
+            joblib.dump(obj, tmp_path, compress=3)
+        except OSError as exc:
+            # Some Windows/Python/joblib combinations can reject compressed
+            # path-based writes with Errno 22. Uncompressed joblib files remain
+            # fully loadable and avoid the zlib file wrapper path.
+            if getattr(exc, "errno", None) != 22:
+                raise
+            joblib.dump(obj, tmp_path, compress=0)
+        os.replace(tmp_path, final_path)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        finally:
+            raise
 
 def load_joblib(path: str):
-    return joblib.load(path)
+    """Load a joblib object from disk."""
+    return joblib.load(os.path.abspath(os.path.normpath(os.fspath(path))))
 
 def _safe_copy_list_of_dict(lst):
+    """Copy checkpoint row dictionaries while skipping malformed entries."""
     if lst is None:
         return []
     out = []
@@ -165,11 +209,13 @@ def _safe_copy_list_of_dict(lst):
     return out
 
 def _safe_set_to_list(s):
+    """Serialize set-like checkpoint fields as lists."""
     if s is None:
         return []
     return list(s)
 
 def _safe_list_to_set(lst):
+    """Deserialize checkpoint list fields back into sets, preserving tuple keys."""
     if lst is None:
         return set()
     out = set()
@@ -186,6 +232,7 @@ def _safe_list_to_set(lst):
 # ============================================================
 
 def load_ohlcv_csv(path: str, freq_name: str) -> pd.DataFrame:
+    """Load an OHLCV CSV into normalized columns used throughout the pipeline."""
     df = pd.read_csv(path)
 
     ts_col = _pick_col(df, ["timestamp", "date", "datetime", "time"])
@@ -232,6 +279,7 @@ KLINE_KEYS = [
 ]
 
 def compute_daily_kline_features(df_day: pd.DataFrame) -> pd.DataFrame:
+    """Compute daily return, volatility, ATR, moving-average, and trend features."""
     d = df_day.copy().sort_values("timestamp").reset_index(drop=True)
     o = d["_open"].astype(float)
     h = d["_high"].astype(float)
@@ -261,6 +309,7 @@ def compute_daily_kline_features(df_day: pd.DataFrame) -> pd.DataFrame:
         d[f"above_ma_{w}"] = (_safe_div(c, ma) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     def _slope_log(x):
+        """Estimate log-price slope over a rolling window."""
         x = np.asarray(x, dtype=float)
         x = np.log(np.maximum(x, 1e-12))
         t = np.arange(len(x), dtype=float)
@@ -273,6 +322,7 @@ def compute_daily_kline_features(df_day: pd.DataFrame) -> pd.DataFrame:
     return d
 
 def make_kline_dict(row: pd.Series) -> Dict[str, float]:
+    """Convert daily kline feature columns into model feature dictionary keys."""
     out = {}
     for k in KLINE_KEYS:
         val = row[k] if k in row.index else 0.0
@@ -285,6 +335,7 @@ def make_kline_dict(row: pd.Series) -> Dict[str, float]:
 # ============================================================
 
 def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: str) -> pd.DataFrame:
+    """Load macro/index CSVs and prefix their daily features for merging into the main daily frame."""
     out = None
 
     for pref, fn in files.items():
@@ -327,6 +378,7 @@ def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: s
 # ============================================================
 
 def to_ctime(ts) -> CTime:
+    """Convert pandas/python timestamps into the Chan library CTime type."""
     if isinstance(ts, CTime):
         return ts
     dt = pd.to_datetime(ts).to_pydatetime()
@@ -345,6 +397,7 @@ def to_ctime(ts) -> CTime:
         return CTime(s)
 
 def build_klu(ts, o, h, l, c, v=0.0) -> CKLine_Unit:
+    """Build one Chan K-line unit from OHLCV fields."""
     ct = to_ctime(ts)
     kl_dict = {
         DATA_FIELD.FIELD_TIME: ct,
@@ -365,6 +418,7 @@ def build_klu(ts, o, h, l, c, v=0.0) -> CKLine_Unit:
     return klu
 
 def feed_chan_one(chan_obj, klu: CKLine_Unit):
+    """Feed one K-line unit into whichever streaming method the Chan object exposes."""
     if hasattr(chan_obj, "process_new_kline"):
         return chan_obj.process_new_kline(klu)
     if hasattr(chan_obj, "step_load"):
@@ -377,6 +431,7 @@ def feed_chan_one(chan_obj, klu: CKLine_Unit):
 # ============================================================
 
 def normalize_bsp_row(r: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize exported buy/sell point rows into consistent timestamp/direction/type fields."""
     rr = dict(r)
     if "timestamp" in rr:
         rr["timestamp"] = pd.to_datetime(rr["timestamp"], errors="coerce")
@@ -393,6 +448,7 @@ def normalize_bsp_row(r: Dict[str, Any]) -> Dict[str, Any]:
     return rr
 
 def extract_bsp_rows_from_chan(chan_obj) -> List[Dict[str, Any]]:
+    """Read newly emitted buy/sell points from a Chan object."""
     if hasattr(chan_obj, "export_new_historical_bsp_to_list"):
         out = chan_obj.export_new_historical_bsp_to_list()
         return out if out else []
@@ -402,6 +458,7 @@ def extract_bsp_rows_from_chan(chan_obj) -> List[Dict[str, Any]]:
     return []
 
 def latest_bsp_dir_up_to(bsp_rows: List[Dict[str, Any]], ts: pd.Timestamp) -> Optional[str]:
+    """Return the latest buy/sell point direction known by timestamp ts."""
     past = [r for r in bsp_rows if pd.to_datetime(r["timestamp"]) <= ts]
     if not past:
         return None
@@ -409,6 +466,7 @@ def latest_bsp_dir_up_to(bsp_rows: List[Dict[str, Any]], ts: pd.Timestamp) -> Op
     return str(past[-1].get("direction", "")).lower()
 
 def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp, window_days: int = 60) -> Dict[str, float]:
+    """Build compact daily context features from recent buy/sell point history."""
     past = [r for r in bsp_hist if pd.to_datetime(r["timestamp"]) <= cur_ts]
     past = sorted(past, key=lambda x: pd.to_datetime(x["timestamp"]))
     if not past:
@@ -430,6 +488,7 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
     days_since_last = float((cur_ts.normalize() - pd.to_datetime(last["timestamp"]).normalize()).days)
 
     def _days_since(target: str) -> float:
+        """Days since the most recent buy or sell point of a given direction."""
         for r in reversed(past):
             if str(r.get("direction", "")).lower() == target:
                 return float((cur_ts.normalize() - pd.to_datetime(r["timestamp"]).normalize()).days)
@@ -455,6 +514,7 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
     }
 
 def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Compress consecutive same-direction buy/sell points into chain endpoints."""
     if not bsp_rows:
         return []
     bsps = sorted(bsp_rows, key=lambda r: pd.to_datetime(r["timestamp"]))
@@ -476,6 +536,7 @@ def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, An
     return ends
 
 def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]]) -> str:
+    """Infer an up/down/unknown regime from surrounding buy/sell chain endpoints."""
     if len(ends) < 2:
         return "unknown"
     for k in range(len(ends) - 1):
@@ -495,23 +556,45 @@ def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]])
 # DAILY LABEL + MODEL
 # ============================================================
 
-def label_confirm_extreme(df_day_feat: pd.DataFrame, idx: int, N: int, base_dir: str) -> Optional[int]:
+def label_confirm_extreme(
+    df_day_feat: pd.DataFrame,
+    idx: int,
+    N: int,
+    base_dir: str,
+    dd_thresh: float = -0.03,
+) -> Optional[int]:
+    """Label whether the next N daily bars confirm instability with a drawdown."""
     if N <= 0:
         return None
     if idx + N >= len(df_day_feat):
         return None
-    h0 = float(df_day_feat.loc[idx, "_high"])
-    l0 = float(df_day_feat.loc[idx, "_low"])
+    if str(base_dir).lower() not in {"buy", "sell"}:
+        return None
+    c0 = float(df_day_feat.loc[idx, "_close"])
+    if not (np.isfinite(c0) and c0 > 0):
+        return None
     fut = df_day_feat.loc[idx+1:idx+N]
     if fut.empty:
         return None
-    if base_dir == "sell":
-        mx = float(fut["_high"].max())
-        return 1 if mx < h0 else 0
-    if base_dir == "buy":
-        mn = float(fut["_low"].min())
-        return 1 if mn > l0 else 0
-    return None
+    future_low = float(fut["_low"].min())
+    drawdown = (future_low / c0) - 1.0
+    return 1 if drawdown <= float(dd_thresh) else 0
+
+def latest_prior_probability_for_day(
+    p_by_day: Dict[pd.Timestamp, float],
+    day: pd.Timestamp,
+) -> tuple[float, Optional[pd.Timestamp]]:
+    """Return the latest finite p_day strictly before day for trade-time decisions."""
+    day = pd.to_datetime(day).normalize()
+    candidates = [
+        pd.to_datetime(k).normalize()
+        for k, value in (p_by_day or {}).items()
+        if pd.to_datetime(k).normalize() < day and np.isfinite(float(value))
+    ]
+    if not candidates:
+        return 0.5, None
+    source_day = max(candidates)
+    return float(p_by_day[source_day]), source_day
 
 def make_daily_features_one_model(
     kline_row: pd.Series,
@@ -523,6 +606,7 @@ def make_daily_features_one_model(
     base_dir: Optional[str],
     macro_cols: Optional[List[str]] = None,
 ) -> Dict[str, float]:
+    """Build the daily probability model feature dictionary for one day."""
     feats: Dict[str, float] = {}
     feats.update(make_kline_dict(kline_row))
 
@@ -552,6 +636,7 @@ def make_daily_features_one_model(
     return feats
 
 def fit_prob_model_dicts(X_dicts: List[Dict[str, float]], y: np.ndarray):
+    """Fit a calibrated logistic daily probability model from feature dictionaries."""
     base = Pipeline([
         ("vec", DictVectorizer(sparse=True)),
         ("scaler", MaxAbsScaler()),
@@ -581,9 +666,11 @@ def fit_prob_model_dicts(X_dicts: List[Dict[str, float]], y: np.ndarray):
         return base
 
 def predict_prob(model, X_dicts: List[Dict[str, float]]) -> np.ndarray:
+    """Predict positive-class probabilities from the daily classifier."""
     return model.predict_proba(X_dicts)[:, 1]
 
 def _get_underlying_pipeline(model):
+    """Extract the underlying sklearn pipeline from a calibrated classifier when needed."""
     if hasattr(model, "calibrated_classifiers_") and len(getattr(model, "calibrated_classifiers_", [])) > 0:
         cc0 = model.calibrated_classifiers_[0]
         if hasattr(cc0, "estimator") and cc0.estimator is not None:
@@ -591,6 +678,7 @@ def _get_underlying_pipeline(model):
     return model
 
 def feature_importance_from_lr(model, top_n: int = 80) -> pd.DataFrame:
+    """Return largest absolute logistic-regression coefficients as feature importance."""
     pipe = _get_underlying_pipeline(model)
     if not (hasattr(pipe, "named_steps") and "vec" in pipe.named_steps and "lr" in pipe.named_steps):
         return pd.DataFrame(columns=["feature", "coef", "abs_coef"])
@@ -619,6 +707,7 @@ LABEL_COLS = {"best_return_pct"}
 BSP_TYPE_MAP = {"1":1,"2":2,"3a":3,"1p":4,"2s":5,"3b":6}
 
 def prepare_ml_dataset(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepare buy/sell point rows for numeric 5m model training or prediction."""
     if df.empty:
         return df
     df = df.copy()
@@ -637,13 +726,13 @@ def prepare_ml_dataset(df: pd.DataFrame) -> pd.DataFrame:
     numeric_cols = [c for c in numeric_cols if c not in LABEL_COLS]
 
     if numeric_cols:
-        imputer = SimpleImputer(strategy="mean")
-        imputed = imputer.fit_transform(df[numeric_cols])
-        df[numeric_cols] = pd.DataFrame(imputed, columns=numeric_cols, index=df.index).fillna(0.0)
+        means = df[numeric_cols].mean(numeric_only=True).fillna(0.0)
+        df[numeric_cols] = df[numeric_cols].fillna(means).fillna(0.0)
 
     return df
 
 def get_feature_columns(df: pd.DataFrame) -> List[str]:
+    """Choose numeric model feature columns while excluding labels and identifiers."""
     exclude = set(LABEL_COLS) | {
         "timestamp","code","direction","bsp_type","klu_idx",
         "has_best_exit","best_exit_type","best_exit_klu_idx","best_exit_price",
@@ -654,6 +743,7 @@ def get_feature_columns(df: pd.DataFrame) -> List[str]:
     return sorted(cols)
 
 def to_float_matrix(df: pd.DataFrame, cols: List[str]) -> np.ndarray:
+    """Convert selected DataFrame columns into a finite float32 design matrix."""
     if not cols:
         return np.zeros((len(df), 0), dtype=np.float32)
     X = df[cols].copy()
@@ -663,6 +753,7 @@ def to_float_matrix(df: pd.DataFrame, cols: List[str]) -> np.ndarray:
     return X.to_numpy(dtype=np.float32, copy=False)
 
 def _fit_ret_pack(df_dir: pd.DataFrame, feature_cols: List[str], seed: int) -> RetModelPack:
+    """Fit one XGBoost return regressor for a single signal direction."""
     ret_df = df_dir.dropna(subset=["best_return_pct"]).copy()
     X = to_float_matrix(ret_df, feature_cols)
     y = ret_df["best_return_pct"].to_numpy(dtype=np.float32)
@@ -685,6 +776,7 @@ def train_models_two_sided_ret_only(
     feature_cols: List[str],
     min_samples_total: int = 300,
 ):
+    """Train separate buy and sell 5m return models when enough labeled rows exist."""
     if bsp_df.empty or "direction" not in bsp_df.columns:
         return None, None
 
@@ -707,14 +799,17 @@ def train_models_two_sided_ret_only(
     return buy_pack, sell_pack
 
 def predict_ret(pack: RetModelPack, row_df: pd.DataFrame) -> float:
+    """Predict best_return_pct for one prepared 5m signal row."""
     X = to_float_matrix(row_df, pack.feature_cols)
     return float(pack.model_ret.predict(X)[0])
 
-def make_ret_grid(start: float = -0.5, end: float = 2.5, step: float = 0.05) -> List[float]:
+def make_ret_grid(start: float = -0.5, end: float = 2.5, step: float = 0.005) -> List[float]:
+    """Build an inclusive threshold grid for predicted 5m percent returns."""
     vals = np.arange(start, end + 1e-12, step, dtype=float)
     return [float(x) for x in vals]
 
 def _bars_from_days(days: float, bar_interval_minutes: int) -> int:
+    """Convert a day-based lookahead window into a number of intraday bars."""
     minutes = float(days) * 24.0 * 60.0
     return max(1, int(round(minutes / float(bar_interval_minutes))))
 
@@ -727,6 +822,7 @@ def label_bestlookahead_for_ready_points(
     bar_interval_minutes: int,
     current_bar_idx: int,
 ):
+    """Attach realized best forward return labels once enough future 5m bars are available."""
     if not bsp_rows:
         return
     lookahead_bars = _bars_from_days(lookahead_days, bar_interval_minutes)
@@ -766,12 +862,14 @@ def _simulate_realized_ret_only_long(
     end_bar_idx: int,
     fee_pct: float = 0.0,
 ):
+    """Replay recent predicted signals with fixed thresholds and return ending equity/trade count."""
     cash = 1.0
     pos = 0
     qty = 0.0
     trades = 0
 
     def exec_next_open(idx: int):
+        """Execution price helper for next-bar-open fills."""
         if not (0 <= idx < len(next_open_by_idx)):
             return None
         px = next_open_by_idx[idx]
@@ -826,6 +924,7 @@ def choose_thresholds_global_realized(
     fee_pct: float = 0.0,
     min_open_signals: int = 10,
 ):
+    """Grid-search 5m buy/sell return thresholds that maximize recent realized equity."""
     if df_5m.empty or not bsp_rows or buy_pack is None or sell_pack is None:
         return None
 
@@ -899,7 +998,9 @@ def choose_thresholds_global_realized(
 # ============================================================
 
 class ExecutionEngine:
+    """Long-only next-bar-open execution simulator with pending orders and checkpointable state."""
     def __init__(self, initial_capital: float, fee_pct: float):
+        """Initialize cash, position, fee, and trade log state."""
         self.cash = float(initial_capital)
         self.fee_pct = float(fee_pct)
         self.pos = 0
@@ -910,6 +1011,7 @@ class ExecutionEngine:
         self.trades = []
 
     def _exec_px(self, seen_idx: int, next_open_by_idx: np.ndarray):
+        """Return the next-open execution price for a signal index, if available."""
         if not (0 <= seen_idx < len(next_open_by_idx)):
             return None
         px = next_open_by_idx[seen_idx]
@@ -918,11 +1020,13 @@ class ExecutionEngine:
         return float(px)
 
     def place_order_for_next_bar(self, side: str, seen_idx: int, reason: str, meta: dict = None, overwrite=True):
+        """Queue a buy or sell to execute at the next bar's open."""
         if self.pending_order is not None and not overwrite:
             return
         self.pending_order = {"side": side, "seen_idx": int(seen_idx), "reason": reason, "meta": dict(meta) if meta else {}}
 
     def maybe_execute_pending(self, next_open_by_idx: np.ndarray):
+        """Execute the queued order if its next-open price is available."""
         if self.pending_order is None:
             return
         side = self.pending_order["side"]
@@ -965,12 +1069,14 @@ class ExecutionEngine:
         self.pending_order = None
 
     def mark_to_market(self, last_close: float) -> float:
+        """Return current account equity using the supplied latest close."""
         px = float(last_close)
         if self.pos == 0:
             return float(self.cash)
         return float(self.cash + self.qty * px)
 
     def state_dict(self) -> dict:
+        """Serialize the execution state for checkpoints or live handoff."""
         return {
             "cash": self.cash,
             "fee_pct": self.fee_pct,
@@ -983,6 +1089,7 @@ class ExecutionEngine:
         }
 
     def load_state_dict(self, d: dict):
+        """Restore a previously serialized execution state."""
         self.cash = float(d.get("cash", self.cash))
         self.fee_pct = float(d.get("fee_pct", self.fee_pct))
         self.pos = int(d.get("pos", 0))
@@ -998,6 +1105,7 @@ class ExecutionEngine:
 # ============================================================
 
 def load_5m_index(df_5m: pd.DataFrame, start_time: str, end_time: str):
+    """Build indexed 5m arrays and daily close maps used by simulations."""
     df = df_5m.copy()
     st = pd.to_datetime(start_time)
     et = pd.to_datetime(end_time)
@@ -1024,6 +1132,7 @@ def load_5m_index(df_5m: pd.DataFrame, start_time: str, end_time: str):
     return df, next_open_by_idx, next_close_by_idx, closes, highs, lows, day_close_map, all_days
 
 def compute_buy_hold_equity(day_close_map: dict, daily_dates: list, initial_capital: float) -> pd.Series:
+    """Compute a buy-and-hold equity curve from daily close prices."""
     closes, dates = [], []
     for d in daily_dates:
         px = day_close_map.get(d)
@@ -1056,6 +1165,7 @@ def make_bandit_state_from_daily_row(
     equity_rel: float,
     dd_rel: float,
 ) -> Dict[str, float]:
+    """Build daily bandit state features from kline, BSP, model, and account context."""
     feats = make_daily_features_one_model(
         kline_row=kline_row,
         bsp_hist_up_to_day=bsp_hist_up_to_day,
@@ -1080,6 +1190,7 @@ def make_bandit_state_from_daily_row(
 # ============================================================
 
 def pack_ret_modelpack_for_save(pack):
+    """Convert RetModelPack to a plain dict for class-stable checkpointing."""
     if pack is None:
         return None
     return {
@@ -1089,6 +1200,7 @@ def pack_ret_modelpack_for_save(pack):
     }
 
 def unpack_ret_modelpack_from_load(obj):
+    """Restore RetModelPack from the class-free checkpoint representation."""
     if obj is None:
         return None
     if isinstance(obj, dict) and obj.get("__type__") == "RetModelPack":
@@ -1152,6 +1264,7 @@ def build_checkpoint_bundle(
     daily_chan_max_klines: int,
     five_chan_max_klines: int,
 ):
+    """Build the legacy daily-bandit/5m-XGB checkpoint bundle."""
     p_by_day_str = {}
     if p_by_day is not None:
         for k, v in p_by_day.items():
@@ -1215,6 +1328,7 @@ def build_checkpoint_bundle(
     return bundle
 
 def load_checkpoint_bundle(path: str) -> dict:
+    """Load a legacy checkpoint bundle and validate its container type."""
     b = load_joblib(path)
     if not isinstance(b, dict):
         raise ValueError("Checkpoint is not a dict.")
@@ -1267,6 +1381,7 @@ def run_daily_bandit_then_5m_xgb(
     checkpoint_every_n_days: int = 1,
     resume_from_checkpoint_path: str | None = None,
 ):
+    """Run or resume the legacy daily-bandit gate plus 5m XGBoost trading strategy."""
     os.makedirs(output_dir, exist_ok=True)
 
     if macro_files is None:
@@ -1418,7 +1533,7 @@ def run_daily_bandit_then_5m_xgb(
     last_train_day = None
 
     if threshold_ret_grid is None:
-        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.05)
+        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.005)
     buy_ret_th_live = 0.30
     sell_ret_th_live = 0.30
 
@@ -1506,6 +1621,7 @@ def run_daily_bandit_then_5m_xgb(
     # Daily trainer helper
     # ----------------------------
     def maybe_train_daily():
+        """Train/retrain the daily probability model after enough confirmed labels are available."""
         if len(y_days) < int(min_labeled_days_to_train):
             return
         if st.model is None or st.new_labels >= int(retrain_every_new_labels):
@@ -1526,6 +1642,7 @@ def run_daily_bandit_then_5m_xgb(
     # Save checkpoint helper
     # ----------------------------
     def save_checkpoint(now_ts: pd.Timestamp, daily_i_last: int, five_i_last: int, current_day):
+        """Persist enough strategy/model state to resume from the current timestamp."""
         if save_checkpoint_path is None:
             return
 
@@ -1734,6 +1851,7 @@ def run_daily_bandit_then_5m_xgb(
         print(f"[PHASE2/3] 5m feed begins at accumulation_start={acc_s.date()}, trading starts at sim_s={sim_s.date()}")
 
     def maybe_retrain_5m(day_ts: pd.Timestamp):
+        """Train/retrain legacy 5m return models on accumulated labeled signals."""
         nonlocal buy_pack, sell_pack, last_train_day
         if last_train_day is not None and (day_ts - last_train_day).days < int(retrain_every_days_5m):
             return
@@ -1753,6 +1871,7 @@ def run_daily_bandit_then_5m_xgb(
                 print(f"[TRAIN][5M] asof={day_ts.date()} feats={len(feat_cols)} buy={'YES' if bp else 'NO'} sell={'YES' if sp else 'NO'} rows={len(dfb2)}")
 
     def maybe_opt_thresholds(asof_bar_idx: int):
+        """Refresh legacy 5m buy/sell thresholds from recent realized replay."""
         nonlocal buy_ret_th_live, sell_ret_th_live
         if buy_pack is None or sell_pack is None:
             return
@@ -1797,19 +1916,45 @@ def run_daily_bandit_then_5m_xgb(
         regime = regime_for_day_from_ends(day, ends)
         base_dir = latest_bsp_dir_up_to(bsp_hist, ts)
 
-        p_day_val = float(p_series[i_day]) if np.isfinite(p_series[i_day]) else 0.5
-        dp_min = float(dp_vs_minK_series[i_day]) if np.isfinite(dp_vs_minK_series[i_day]) else 0.0
-        dp_max = float(dp_vs_maxK_series[i_day]) if np.isfinite(dp_vs_maxK_series[i_day]) else 0.0
+        p_day_val, p_day_source_date = latest_prior_probability_for_day(p_by_day, day)
+        if p_day_source_date is None:
+            action_name = "FREE"
+            daily_action_map[day] = {
+                "action": action_name,
+                "x": None,
+                "i_day": i_day,
+                "p_day": p_day_val,
+                "p_day_source_date": p_day_source_date,
+            }
+            daily_bandit_log.append({
+                "date": day,
+                "action": action_name,
+                "p_day": p_day_val,
+                "p_day_source_date": p_day_source_date,
+            })
+            cur_gate_name = action_name
+            continue
+
+        source_i_day = day_index_map.get(p_day_source_date, max(0, i_day - 1))
+        source_row = df_day_feat.loc[source_i_day]
+        source_ts = pd.to_datetime(source_row["timestamp"])
+        source_day = source_ts.normalize()
+        source_bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= source_ts]
+        source_ends = compute_chain_endpoints(source_bsp_hist)
+        source_regime = regime_for_day_from_ends(source_day, source_ends)
+        source_base_dir = latest_bsp_dir_up_to(source_bsp_hist, source_ts)
+        dp_min = float(dp_vs_minK_series[source_i_day]) if np.isfinite(dp_vs_minK_series[source_i_day]) else 0.0
+        dp_max = float(dp_vs_maxK_series[source_i_day]) if np.isfinite(dp_vs_maxK_series[source_i_day]) else 0.0
 
         dd_rel = 0.0 if equity_peak <= 0 else max(0.0, (equity_peak - est_equity) / equity_peak)
         state_dict = make_bandit_state_from_daily_row(
-            kline_row=r,
-            bsp_hist_up_to_day=bsp_hist,
+            kline_row=source_row,
+            bsp_hist_up_to_day=source_bsp_hist,
             p_val=p_day_val,
             dp_minK=dp_min,
             dp_maxK=dp_max,
-            regime=regime,
-            base_dir=base_dir,
+            regime=source_regime,
+            base_dir=source_base_dir,
             macro_cols=macro_cols,
             current_pos=cur_pos_for_bandit,
             current_gate=cur_gate_name,
@@ -1825,35 +1970,36 @@ def run_daily_bandit_then_5m_xgb(
             "x": x,
             "i_day": i_day,
             "p_day": p_day_val,
+            "p_day_source_date": p_day_source_date,
         }
 
-        # simple reward proxy at daily layer for online bandit update
-        # uses next daily open-close return, while true realized strategy reward will still come through full engine
-        if i_day + 1 < len(df_day_feat):
-            next_open = float(df_day_feat.loc[i_day + 1, "_open"])
-            next_close = float(df_day_feat.loc[i_day + 1, "_close"])
-            gross_ret = (next_close / max(next_open, 1e-12)) - 1.0
-            if action_name == "FORCE_BUY":
-                rwd = gross_ret
-                cur_pos_for_bandit = 1
-            elif action_name == "FORCE_SELL":
-                rwd = 0.0
-                cur_pos_for_bandit = 0
-            else:
-                rwd = 0.5 * gross_ret
-            bandit.update(action, x, rwd)
+        # End-of-day update: this reward is only available after day closes,
+        # so it may influence later days but not the action already chosen today.
+        day_open = float(df_day_feat.loc[i_day, "_open"])
+        day_close = float(df_day_feat.loc[i_day, "_close"])
+        gross_ret = (day_close / max(day_open, 1e-12)) - 1.0
+        if action_name == "FORCE_BUY":
+            rwd = gross_ret
+            cur_pos_for_bandit = 1
+        elif action_name == "FORCE_SELL":
+            rwd = 0.0
+            cur_pos_for_bandit = 0
+        else:
+            rwd = 0.5 * gross_ret
+        bandit.update(action, x, rwd)
 
-            if action_name == "FORCE_BUY":
-                est_equity *= (1.0 + gross_ret)
-            elif action_name == "FREE":
-                est_equity *= (1.0 + 0.5 * gross_ret)
-            equity_peak = max(equity_peak, est_equity)
-            cur_gate_name = action_name
+        if action_name == "FORCE_BUY":
+            est_equity *= (1.0 + gross_ret)
+        elif action_name == "FREE":
+            est_equity *= (1.0 + 0.5 * gross_ret)
+        equity_peak = max(equity_peak, est_equity)
+        cur_gate_name = action_name
 
         daily_bandit_log.append({
             "date": day,
             "action": action_name,
             "p_day": p_day_val,
+            "p_day_source_date": p_day_source_date,
         })
 
     sim_start_ts = pd.to_datetime(sim_start)

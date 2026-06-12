@@ -53,7 +53,22 @@ from pipelineCurrent import (
 )
 
 
+def latest_p_day_before(p_by_day: Dict[pd.Timestamp, float], day: pd.Timestamp) -> tuple[float, Optional[pd.Timestamp]]:
+    """Return the latest finite daily probability strictly before day."""
+    day = pd.to_datetime(day).normalize()
+    candidates = [
+        pd.to_datetime(k).normalize()
+        for k, value in (p_by_day or {}).items()
+        if pd.to_datetime(k).normalize() < day and np.isfinite(float(value))
+    ]
+    if not candidates:
+        return np.nan, None
+    source_day = max(candidates)
+    return float(p_by_day[source_day]), source_day
+
+
 def clone_engine_from_state(engine_state: dict, fee_pct: float) -> ExecutionEngine:
+    """Create an ExecutionEngine clone for counterfactual one-day simulations."""
     eng = ExecutionEngine(initial_capital=1.0, fee_pct=fee_pct)
     eng.load_state_dict(copy.deepcopy(engine_state))
     eng.fee_pct = float(fee_pct)
@@ -75,6 +90,7 @@ def simulate_one_day_under_gate_from_events(
     sell_ret_th_live: float,
     fee_pct: float = 0.0,
 ) -> dict:
+    """Replay one day under a candidate daily gate and return start/end equity plus return."""
     eng = clone_engine_from_state(engine_state, fee_pct=fee_pct)
     eng.maybe_execute_pending(next_open_by_idx)
 
@@ -166,6 +182,7 @@ def evaluate_three_day_rewards_for_logging(
     sell_ret_th_live: float,
     fee_pct: float = 0.0,
 ) -> dict:
+    """Evaluate FORCE_BUY, FREE, and FORCE_SELL rewards for one completed trading day."""
     out = {}
     for gate_action in ["FORCE_BUY", "FREE", "FORCE_SELL"]:
         out[gate_action] = simulate_one_day_under_gate_from_events(
@@ -187,6 +204,7 @@ def evaluate_three_day_rewards_for_logging(
 
 
 def _make_chan_config() -> CChanConfig:
+    """Return the Chan configuration used by raw/adaptive walk-forward experiments."""
     return CChanConfig({
         "cal_demark": True,
         "cal_kdj": True,
@@ -244,12 +262,13 @@ def run_raw_adaptive_threshold_walkforward(
     output_dir: str = "output_raw_adaptive_threshold_walkforward",
     verbose: bool = True,
 ) -> dict:
+    """Run the original raw adaptive threshold walk-forward experiment from CSV data."""
     os.makedirs(output_dir, exist_ok=True)
 
     if macro_files is None:
         macro_files = {"vix_": "VIX.csv"}
     if threshold_ret_grid is None:
-        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.05)
+        threshold_ret_grid = make_ret_grid(-0.5, 2.5, 0.005)
     if daily_threshold_config is None:
         daily_threshold_config = RollingThresholdConfig(
             lookback_days=252,
@@ -429,10 +448,13 @@ def run_raw_adaptive_threshold_walkforward(
         )
     current_buy_level = float(static_buy_level)
     current_sell_level = float(static_sell_level)
+    current_p_day = np.nan
+    current_p_day_source_date = None
     current_pair_action_idx = None
     current_pair_state_x = None
 
     def maybe_retrain_5m(day_ts: pd.Timestamp):
+        """Retrain intraday return models on accumulated labeled 5m signal rows."""
         nonlocal buy_pack, sell_pack, last_train_day
         if last_train_day is not None and (day_ts - last_train_day).days < int(retrain_every_days_5m):
             return
@@ -455,6 +477,7 @@ def run_raw_adaptive_threshold_walkforward(
                 )
 
     def maybe_opt_5m_thresholds(asof_bar_idx: int):
+        """Update live 5m buy/sell thresholds using recent realized outcomes."""
         nonlocal buy_ret_th_live, sell_ret_th_live
         if buy_pack is None or sell_pack is None:
             return
@@ -475,8 +498,9 @@ def run_raw_adaptive_threshold_walkforward(
             buy_ret_th_live, sell_ret_th_live = out
 
     def choose_daily_gate_for_day(bar_day: pd.Timestamp) -> dict:
+        """Choose the daily gate using static thresholds, adaptive thresholds, or a bandit policy."""
         nonlocal current_buy_level, current_sell_level, current_pair_action_idx, current_pair_state_x
-        p_day_val = float(p_by_day.get(bar_day, np.nan))
+        p_day_val, p_day_source_date = latest_p_day_before(p_by_day, bar_day)
         hist_df = pd.DataFrame(daily_reward_log)
 
         if policy_mode == "static":
@@ -485,7 +509,13 @@ def run_raw_adaptive_threshold_walkforward(
             current_sell_level = float(static_sell_level)
             current_pair_action_idx = None
             current_pair_state_x = None
-            return {"gate": gate, "buy_level": current_buy_level, "sell_level": current_sell_level, "p_day": p_day_val}
+            return {
+                "gate": gate,
+                "buy_level": current_buy_level,
+                "sell_level": current_sell_level,
+                "p_day": p_day_val,
+                "p_day_source_date": p_day_source_date,
+            }
 
         if policy_mode in ("adaptive_reward", "adaptive_accuracy"):
             obj = "reward" if policy_mode == "adaptive_reward" else "accuracy"
@@ -501,10 +531,21 @@ def run_raw_adaptive_threshold_walkforward(
             current_sell_level = out.sell_level
             current_pair_action_idx = None
             current_pair_state_x = None
-            return {"gate": out.gate, "buy_level": out.buy_level, "sell_level": out.sell_level, "p_day": p_day_val}
+            return {
+                "gate": out.gate,
+                "buy_level": out.buy_level,
+                "sell_level": out.sell_level,
+                "p_day": p_day_val,
+                "p_day_source_date": p_day_source_date,
+            }
 
         if policy_mode == "threshold_pair_bandit":
-            dd_rel = 0.0 if equity_peak <= 0 else max(0.0, (equity_peak - engine.mark_to_market(day_close_map.get(bar_day.date(), closes[0]))) / equity_peak)
+            prior_close = np.nan
+            prior_days = [d for d in day_close_map.keys() if pd.to_datetime(d) < bar_day]
+            if prior_days:
+                prior_close = day_close_map[max(prior_days)]
+            equity_for_state = engine.cash if not np.isfinite(prior_close) else engine.mark_to_market(prior_close)
+            dd_rel = 0.0 if equity_peak <= 0 else max(0.0, (equity_peak - equity_for_state) / equity_peak)
             x = make_daily_threshold_state(
                 p_day=p_day_val,
                 dp_min=0.0,
@@ -518,15 +559,25 @@ def run_raw_adaptive_threshold_walkforward(
             current_pair_state_x = x
             current_buy_level = float(decision["buy_level"])
             current_sell_level = float(decision["sell_level"])
-            return {"gate": decision["gate"], "buy_level": current_buy_level, "sell_level": current_sell_level, "p_day": p_day_val}
+            return {
+                "gate": decision["gate"],
+                "buy_level": current_buy_level,
+                "sell_level": current_sell_level,
+                "p_day": p_day_val,
+                "p_day_source_date": p_day_source_date,
+            }
 
         raise ValueError(f"Unknown policy_mode: {policy_mode}")
 
     def begin_day(bar_day: pd.Timestamp, bar_idx: int):
+        """Initialize daily gate constraints and snapshot state for reward logging."""
         nonlocal day_gate, allow_buy, allow_sell, must_trade_dir
         nonlocal day_start_engine_state, day_events_today, day_start_idx
+        nonlocal current_p_day, current_p_day_source_date
         info = choose_daily_gate_for_day(bar_day)
         day_gate = info["gate"]
+        current_p_day = info.get("p_day", np.nan)
+        current_p_day_source_date = info.get("p_day_source_date")
         allow_buy = True
         allow_sell = True
         must_trade_dir = None
@@ -578,7 +629,8 @@ def run_raw_adaptive_threshold_walkforward(
                 oracle_equity *= (1.0 + reward_map[best_action_ex_post]["day_return"])
                 daily_reward_log.append({
                     "date": prev_day,
-                    "p_day": float(p_by_day.get(prev_day.normalize(), np.nan)),
+                    "p_day": current_p_day,
+                    "p_day_source_date": current_p_day_source_date,
                     "buy_level": current_buy_level,
                     "sell_level": current_sell_level,
                     "chosen_action": day_gate,
@@ -618,7 +670,8 @@ def run_raw_adaptive_threshold_walkforward(
                 "pos": engine.pos,
                 "buy_th": buy_ret_th_live,
                 "sell_th": sell_ret_th_live,
-                "p_day": float(p_by_day.get(prev_day.normalize(), np.nan)),
+                "p_day": current_p_day,
+                "p_day_source_date": current_p_day_source_date,
                 "daily_action": day_gate,
                 "daily_buy_level": current_buy_level,
                 "daily_sell_level": current_sell_level,
@@ -692,7 +745,8 @@ def run_raw_adaptive_threshold_walkforward(
                         reason=("ADAPTIVE_FORCE_BUY->first acceptable 5m signal" if day_gate == "FORCE_BUY" else "5m BUY signal"),
                         meta={
                             "ts": str(bar_ts),
-                            "p_day": float(p_by_day.get(bar_day, np.nan)),
+                            "p_day": current_p_day,
+                            "p_day_source_date": current_p_day_source_date,
                             "pred": float(pr),
                             "th": float(buy_ret_th_live),
                             "gate": day_gate,
@@ -714,7 +768,8 @@ def run_raw_adaptive_threshold_walkforward(
                         reason=("ADAPTIVE_FORCE_SELL->first acceptable 5m signal" if day_gate == "FORCE_SELL" else "5m SELL signal"),
                         meta={
                             "ts": str(bar_ts),
-                            "p_day": float(p_by_day.get(bar_day, np.nan)),
+                            "p_day": current_p_day,
+                            "p_day_source_date": current_p_day_source_date,
                             "pred": float(pr),
                             "th": float(sell_ret_th_live),
                             "gate": day_gate,
@@ -747,7 +802,8 @@ def run_raw_adaptive_threshold_walkforward(
         oracle_equity *= (1.0 + reward_map[best_action_ex_post]["day_return"])
         daily_reward_log.append({
             "date": prev_day,
-            "p_day": float(p_by_day.get(prev_day.normalize(), np.nan)),
+            "p_day": current_p_day,
+            "p_day_source_date": current_p_day_source_date,
             "buy_level": current_buy_level,
             "sell_level": current_sell_level,
             "chosen_action": day_gate,
@@ -771,7 +827,8 @@ def run_raw_adaptive_threshold_walkforward(
             "pos": engine.pos,
             "buy_th": buy_ret_th_live,
             "sell_th": sell_ret_th_live,
-            "p_day": float(p_by_day.get(prev_day.normalize(), np.nan)),
+            "p_day": current_p_day,
+            "p_day_source_date": current_p_day_source_date,
             "daily_action": day_gate,
             "daily_buy_level": current_buy_level,
             "daily_sell_level": current_sell_level,

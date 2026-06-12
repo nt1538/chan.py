@@ -38,7 +38,10 @@ from ZS.ZSConfig import CZSConfig
 
 
 class CChanConfig:
+    """Configuration object for Chan structure, BSP, and indicator calculation."""
+
     def __init__(self, conf=None):
+        """Parse user config values and construct nested Chan component configs."""
         if conf is None:
             conf = {}
         conf = ConfigWithCheck(conf)
@@ -162,6 +165,7 @@ class CChanConfig:
         conf.check()
 
     def GetMetricModel(self):
+        """Instantiate the technical indicator models requested by this config."""
         res: List[CMACD | CTrendModel | BollModel | CDemarkEngine | RSI | KDJ | CDMI | RSL| DemandIndex | ADLine | BollingerBands | KeltnerChannel | STARC] = [
             CMACD(
                 fastperiod=self.macd_config['fast'],
@@ -253,6 +257,7 @@ class CChanConfig:
         return res
 
     def set_bsp_config(self, conf):
+        """Build buy/sell point configs, including buy/sell-specific overrides."""
         para_dict = {
             "divergence_rate": float("inf"),
             "min_zs_cnt": 1,
@@ -309,16 +314,21 @@ class CChanConfig:
 
 
 class ConfigWithCheck:
+    """Wrapper that tracks consumed config keys and rejects unknown options."""
+
     def __init__(self, conf):
+        """Store the mutable config dictionary used during parsing."""
         self.conf = conf
 
     def get(self, k, default_value=None):
+        """Read and mark one config key as consumed."""
         res = self.conf.get(k, default_value)
         if k in self.conf:
             del self.conf[k]
         return res
 
     def items(self):
+        """Iterate over remaining override keys and mark them consumed."""
         visit_keys = set()
         for k, v in self.conf.items():
             yield k, v
@@ -327,6 +337,7 @@ class ConfigWithCheck:
             del self.conf[k]
 
     def check(self):
+        """Raise if any unrecognized config keys remain."""
         if len(self.conf) > 0:
             invalid_key_lst = ",".join(list(self.conf.keys()))
             raise CChanException(f"invalid CChanConfig: {invalid_key_lst}", ErrCode.PARA_ERROR)
