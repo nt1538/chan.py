@@ -18,6 +18,12 @@ import datetime
 from dataclasses import dataclass
 from typing import List, Optional, Any, Dict, Tuple
 import xgboost as xgb
+try:
+    import torch
+    import torch.nn as nn
+except Exception:
+    torch = None
+    nn = None
 
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -48,7 +54,8 @@ from Common.CTime import CTime
 class RetModelPack:
     """Container for a fitted 5m return model and the feature column order it expects."""
     feature_cols: List[str]
-    model_ret: xgb.XGBRegressor
+    model_ret: Any
+    model_type: str = "xgboost"
 
 @dataclass
 class DailyProbState:
@@ -343,17 +350,21 @@ def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: s
         if not os.path.exists(path):
             raise FileNotFoundError(f"Macro file not found: {path}")
 
-        dfm = load_ohlcv_csv(path, pref.upper())
+        feature_pref = str(pref).lower()
+        if not feature_pref.endswith("_"):
+            feature_pref = f"{feature_pref}_"
+
+        dfm = load_ohlcv_csv(path, str(pref).upper())
         dfm = dfm[dfm["timestamp"] >= pd.to_datetime(start)].copy().reset_index(drop=True)
         dfm["ts_norm"] = pd.to_datetime(dfm["timestamp"]).dt.normalize()
 
         dfm_feat = compute_daily_kline_features(dfm)
-        dfm_feat[f"{pref}level"] = dfm_feat["_close"].astype(float)
+        dfm_feat[f"{feature_pref}level"] = dfm_feat["_close"].astype(float)
 
-        keep_cols = ["ts_norm", f"{pref}level"] + KLINE_KEYS
+        keep_cols = ["ts_norm", f"{feature_pref}level"] + KLINE_KEYS
         dfm_feat = dfm_feat[keep_cols].copy()
 
-        rename = {k: f"{pref}{k}" for k in KLINE_KEYS}
+        rename = {k: f"{feature_pref}{k}" for k in KLINE_KEYS}
         dfm_feat = dfm_feat.rename(columns=rename)
 
         out = dfm_feat.copy() if out is None else out.merge(dfm_feat, on="ts_norm", how="outer")
@@ -369,6 +380,15 @@ def load_macro_features_from_folder(folder: str, files: Dict[str, str], start: s
 
         for w in [5, 10, 20, 40]:
             out[f"yc_10y5y_chg_{w}"] = (out["yc_10y5y_level"] - out["yc_10y5y_level"].shift(w)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    if ("us10y_level" in out.columns) and ("us2y_level" in out.columns):
+        out["yc_10y2y_level"] = out["us10y_level"] - out["us2y_level"]
+
+        prev = out["yc_10y2y_level"].shift(1)
+        out["yc_10y2y_ret1"] = (_safe_div(out["yc_10y2y_level"], prev) - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+        for w in [5, 10, 20, 40]:
+            out[f"yc_10y2y_chg_{w}"] = (out["yc_10y2y_level"] - out["yc_10y2y_level"].shift(w)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
     return out.sort_values("ts_norm").reset_index(drop=True)
 
@@ -465,10 +485,60 @@ def latest_bsp_dir_up_to(bsp_rows: List[Dict[str, Any]], ts: pd.Timestamp) -> Op
     past = sorted(past, key=lambda x: pd.to_datetime(x["timestamp"]))
     return str(past[-1].get("direction", "")).lower()
 
-def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp, window_days: int = 60) -> Dict[str, float]:
+def _finite_float(value: Any, default: float = 0.0) -> float:
+    """Convert a value to a finite float with a stable fallback."""
+    try:
+        out = float(value)
+    except Exception:
+        return float(default)
+    return out if np.isfinite(out) else float(default)
+
+def _bsp_close_price(row: Dict[str, Any]) -> float:
+    """Return the best available close/price field from a BSP snapshot."""
+    for key in ("klu_close", "close", "Close", "_close", "price"):
+        if key in row:
+            px = _finite_float(row.get(key), default=np.nan)
+            if np.isfinite(px) and px > 0:
+                return px
+    return np.nan
+
+def _last_bsp_by_direction(past: List[Dict[str, Any]], direction: str) -> Optional[Dict[str, Any]]:
+    """Return the latest BSP row for one direction from an already sorted history."""
+    direction = str(direction).lower()
+    for row in reversed(past):
+        if str(row.get("direction", "")).lower() == direction:
+            return row
+    return None
+
+def _price_diff_and_slope_from_bsp(
+    *,
+    cur_ts: pd.Timestamp,
+    current_close: float,
+    bsp_row: Optional[Dict[str, Any]],
+) -> Tuple[float, float]:
+    """Return relative price distance and per-day slope from a reference BSP."""
+    if bsp_row is None:
+        return 0.0, 0.0
+    ref_px = _bsp_close_price(bsp_row)
+    if not (np.isfinite(current_close) and current_close > 0 and np.isfinite(ref_px) and ref_px > 0):
+        return 0.0, 0.0
+    diff = float(current_close / ref_px - 1.0)
+    ref_ts = pd.to_datetime(bsp_row.get("timestamp"), errors="coerce")
+    if pd.isna(ref_ts):
+        return diff, 0.0
+    days = max(1.0, float((cur_ts.normalize() - ref_ts.normalize()).days))
+    return diff, float(diff / days)
+
+def make_daily_bsp_context(
+    bsp_hist: List[Dict[str, Any]],
+    cur_ts: pd.Timestamp,
+    window_days: int = 60,
+    current_close: Optional[float] = None,
+) -> Dict[str, float]:
     """Build compact daily context features from recent buy/sell point history."""
     past = [r for r in bsp_hist if pd.to_datetime(r["timestamp"]) <= cur_ts]
     past = sorted(past, key=lambda x: pd.to_datetime(x["timestamp"]))
+    cur_close = _finite_float(current_close, default=np.nan)
     if not past:
         return {
             "ctx_has_bsp": 0.0,
@@ -481,6 +551,10 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
             "ctx_density_buy": 0.0,
             "ctx_density_sell": 0.0,
             "ctx_density_imb": 0.0,
+            "ctx_price_diff_from_last_buy": 0.0,
+            "ctx_price_diff_from_last_sell": 0.0,
+            "ctx_slope_from_last_buy": 0.0,
+            "ctx_slope_from_last_sell": 0.0,
         }
 
     last = past[-1]
@@ -499,6 +573,18 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
     buy = sum(1 for r in recent if str(r.get("direction", "")).lower() == "buy")
     sell = sum(1 for r in recent if str(r.get("direction", "")).lower() == "sell")
     tot = max(1.0, float(buy + sell))
+    last_buy = _last_bsp_by_direction(past, "buy")
+    last_sell = _last_bsp_by_direction(past, "sell")
+    diff_buy, slope_buy = _price_diff_and_slope_from_bsp(
+        cur_ts=cur_ts,
+        current_close=cur_close,
+        bsp_row=last_buy,
+    )
+    diff_sell, slope_sell = _price_diff_and_slope_from_bsp(
+        cur_ts=cur_ts,
+        current_close=cur_close,
+        bsp_row=last_sell,
+    )
 
     return {
         "ctx_has_bsp": 1.0,
@@ -511,6 +597,10 @@ def make_daily_bsp_context(bsp_hist: List[Dict[str, Any]], cur_ts: pd.Timestamp,
         "ctx_density_buy": float(buy),
         "ctx_density_sell": float(sell),
         "ctx_density_imb": float((sell - buy) / tot),
+        "ctx_price_diff_from_last_buy": diff_buy,
+        "ctx_price_diff_from_last_sell": diff_sell,
+        "ctx_slope_from_last_buy": slope_buy,
+        "ctx_slope_from_last_sell": slope_sell,
     }
 
 def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -535,20 +625,82 @@ def compute_chain_endpoints(bsp_rows: List[Dict[str, Any]]) -> List[Dict[str, An
     ends.append({"end_ts": pd.to_datetime(cur_end["timestamp"]).normalize(), "end_dir": cur_dir, "end_i": cur_end_i})
     return ends
 
-def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]]) -> str:
+def _latest_bsp_index_by_direction(bsp_rows: List[Dict[str, Any]], direction: str) -> int:
+    """Return the latest index for one BSP direction in a sorted list, or -1."""
+    direction = str(direction).lower()
+    for i in range(len(bsp_rows) - 1, -1, -1):
+        if str(bsp_rows[i].get("direction", "")).lower() == direction:
+            return i
+    return -1
+
+def _infer_regime_from_recent_bsp_prices(
+    bsp_rows: List[Dict[str, Any]],
+    current_close: Optional[float],
+    max_points: int = 5,
+) -> Optional[str]:
+    """Infer an unclosed region from recent BSP prices after the last opposite BSP."""
+    cur_close = _finite_float(current_close, default=np.nan)
+    if not (np.isfinite(cur_close) and cur_close > 0 and bsp_rows):
+        return None
+
+    last_buy_idx = _latest_bsp_index_by_direction(bsp_rows, "buy")
+    last_sell_idx = _latest_bsp_index_by_direction(bsp_rows, "sell")
+
+    sell_refs = [
+        _bsp_close_price(r)
+        for r in bsp_rows[max(0, last_buy_idx + 1):]
+        if str(r.get("direction", "")).lower() == "sell"
+    ][-int(max_points):]
+    sell_refs = [px for px in sell_refs if np.isfinite(px) and px > 0]
+    if sell_refs and cur_close < min(sell_refs):
+        return "down"
+
+    buy_refs = [
+        _bsp_close_price(r)
+        for r in bsp_rows[max(0, last_sell_idx + 1):]
+        if str(r.get("direction", "")).lower() == "buy"
+    ][-int(max_points):]
+    buy_refs = [px for px in buy_refs if np.isfinite(px) and px > 0]
+    if buy_refs and cur_close > max(buy_refs):
+        return "up"
+
+    return None
+
+def regime_for_day_from_ends(
+    day_norm: pd.Timestamp,
+    ends: List[Dict[str, Any]],
+    bsp_rows: Optional[List[Dict[str, Any]]] = None,
+    current_close: Optional[float] = None,
+) -> str:
     """Infer an up/down/unknown regime from surrounding buy/sell chain endpoints."""
-    if len(ends) < 2:
-        return "unknown"
-    for k in range(len(ends) - 1):
-        a = ends[k]
-        b = ends[k + 1]
-        a_ts, a_dir = a["end_ts"], a["end_dir"]
-        b_ts, b_dir = b["end_ts"], b["end_dir"]
-        if (day_norm >= a_ts) and (day_norm <= b_ts):
-            if a_dir == "buy" and b_dir == "sell":
-                return "up"
-            if a_dir == "sell" and b_dir == "buy":
-                return "down"
+    if len(ends) >= 2:
+        for k in range(len(ends) - 1):
+            a = ends[k]
+            b = ends[k + 1]
+            a_ts, a_dir = a["end_ts"], a["end_dir"]
+            b_ts, b_dir = b["end_ts"], b["end_dir"]
+            if (day_norm >= a_ts) and (day_norm <= b_ts):
+                if a_dir == "buy" and b_dir == "sell":
+                    return "up"
+                if a_dir == "sell" and b_dir == "buy":
+                    return "down"
+
+    past = []
+    if bsp_rows:
+        past = [
+            r for r in bsp_rows
+            if pd.to_datetime(r.get("timestamp"), errors="coerce").normalize() <= pd.to_datetime(day_norm).normalize()
+        ]
+        past = sorted(past, key=lambda r: pd.to_datetime(r.get("timestamp"), errors="coerce"))
+    inferred = _infer_regime_from_recent_bsp_prices(past, current_close)
+    if inferred is not None:
+        return inferred
+    if past:
+        last_dir = str(past[-1].get("direction", "")).lower()
+        if last_dir == "buy":
+            return "up"
+        if last_dir == "sell":
+            return "down"
     return "unknown"
 
 
@@ -556,29 +708,47 @@ def regime_for_day_from_ends(day_norm: pd.Timestamp, ends: List[Dict[str, Any]])
 # DAILY LABEL + MODEL
 # ============================================================
 
-def label_confirm_extreme(
-    df_day_feat: pd.DataFrame,
-    idx: int,
-    N: int,
-    base_dir: str,
-    dd_thresh: float = -0.03,
-) -> Optional[int]:
-    """Label whether the next N daily bars confirm instability with a drawdown."""
+# def label_confirm_extreme(
+#     df_day_feat: pd.DataFrame,
+#     idx: int,
+#     N: int,
+#     base_dir: str,
+#     dd_thresh: float = -0.03,
+# ) -> Optional[int]:
+#     """Label whether the next N daily bars confirm instability with a drawdown."""
+#     if N <= 0:
+#         return None
+#     if idx + N >= len(df_day_feat):
+#         return None
+#     if str(base_dir).lower() not in {"buy", "sell"}:
+#         return None
+#     c0 = float(df_day_feat.loc[idx, "_close"])
+#     if not (np.isfinite(c0) and c0 > 0):
+#         return None
+#     fut = df_day_feat.loc[idx+1:idx+N]
+#     if fut.empty:
+#         return None
+#     future_low = float(fut["_low"].min())
+#     drawdown = (future_low / c0) - 1.0
+#     return 1 if drawdown <= float(dd_thresh) else 0
+
+def label_confirm_extreme(df_day_feat: pd.DataFrame, idx: int, N: int, base_dir: str) -> Optional[int]:
     if N <= 0:
         return None
     if idx + N >= len(df_day_feat):
         return None
-    if str(base_dir).lower() not in {"buy", "sell"}:
-        return None
-    c0 = float(df_day_feat.loc[idx, "_close"])
-    if not (np.isfinite(c0) and c0 > 0):
-        return None
+    h0 = float(df_day_feat.loc[idx, "_high"])
+    l0 = float(df_day_feat.loc[idx, "_low"])
     fut = df_day_feat.loc[idx+1:idx+N]
     if fut.empty:
         return None
-    future_low = float(fut["_low"].min())
-    drawdown = (future_low / c0) - 1.0
-    return 1 if drawdown <= float(dd_thresh) else 0
+    if base_dir == "sell":
+        mx = float(fut["_high"].max())
+        return 1 if mx < h0 else 0
+    if base_dir == "buy":
+        mn = float(fut["_low"].min())
+        return 1 if mn > l0 else 0
+    return None
 
 def latest_prior_probability_for_day(
     p_by_day: Dict[pd.Timestamp, float],
@@ -617,7 +787,14 @@ def make_daily_features_one_model(
                 feats[c] = float(val) if np.isfinite(val) else 0.0
 
     ts = pd.to_datetime(kline_row["timestamp"])
-    feats.update(make_daily_bsp_context(bsp_hist_up_to_day, ts, window_days=60))
+    feats.update(
+        make_daily_bsp_context(
+            bsp_hist_up_to_day,
+            ts,
+            window_days=60,
+            current_close=kline_row.get("_close", kline_row.get("Close", np.nan)),
+        )
+    )
 
     feats["p"] = float(p_val) if np.isfinite(p_val) else 0.0
     feats["dp_minK"] = float(dp_minK) if np.isfinite(dp_minK) else 0.0
@@ -641,11 +818,10 @@ def fit_prob_model_dicts(X_dicts: List[Dict[str, float]], y: np.ndarray):
         ("vec", DictVectorizer(sparse=True)),
         ("scaler", MaxAbsScaler()),
         ("lr", LogisticRegression(
-            max_iter=8000,
+            max_iter=2000,
             class_weight="balanced",
-            solver="saga",
+            solver="lbfgs",
             C=0.5,
-            n_jobs=-1
         ))
     ])
     uniq, counts = np.unique(y, return_counts=True)
@@ -752,7 +928,157 @@ def to_float_matrix(df: pd.DataFrame, cols: List[str]) -> np.ndarray:
     X = X.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return X.to_numpy(dtype=np.float32, copy=False)
 
-def _fit_ret_pack(df_dir: pd.DataFrame, feature_cols: List[str], seed: int) -> RetModelPack:
+def ensure_feature_columns(df: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
+    """Return a de-fragmented frame with any missing model features filled as zero."""
+    missing_cols = [c for c in feature_cols if c not in df.columns]
+    if missing_cols:
+        missing_df = pd.DataFrame(0.0, index=df.index, columns=missing_cols)
+        return pd.concat([df, missing_df], axis=1).copy()
+    return df.copy()
+
+
+class _LSTMReturnNet(nn.Module if nn is not None else object):
+    """Small LSTM regressor for ordered 5m BSP feature sequences."""
+
+    def __init__(self, n_features: int, hidden_size: int = 64, num_layers: int = 1, dropout: float = 0.0):
+        if nn is None:
+            raise ImportError("PyTorch is required for the LSTM 5m return model.")
+        super().__init__()
+        self.lstm = nn.LSTM(
+            input_size=int(n_features),
+            hidden_size=int(hidden_size),
+            num_layers=int(num_layers),
+            batch_first=True,
+            dropout=float(dropout) if int(num_layers) > 1 else 0.0,
+        )
+        self.head = nn.Sequential(
+            nn.Linear(int(hidden_size), int(hidden_size) // 2),
+            nn.ReLU(),
+            nn.Linear(int(hidden_size) // 2, 1),
+        )
+
+    def forward(self, x):
+        out, _ = self.lstm(x)
+        return self.head(out[:, -1, :]).squeeze(-1)
+
+
+class LSTMReturnRegressor:
+    """
+    Sklearn-like wrapper used by RetModelPack.
+
+    predict(X) accepts the same 2D feature matrix as XGBoost. For batch calls it
+    builds rolling sequences. For single live rows, it pads the sequence with
+    the current row so existing predict_ret(pack, row_df) calls keep working.
+    """
+
+    def __init__(
+        self,
+        seq_len: int = 20,
+        hidden_size: int = 64,
+        num_layers: int = 1,
+        dropout: float = 0.0,
+        epochs: int = 30,
+        batch_size: int = 64,
+        learning_rate: float = 1e-3,
+        seed: int = 42,
+    ):
+        self.seq_len = int(seq_len)
+        self.hidden_size = int(hidden_size)
+        self.num_layers = int(num_layers)
+        self.dropout = float(dropout)
+        self.epochs = int(epochs)
+        self.batch_size = int(batch_size)
+        self.learning_rate = float(learning_rate)
+        self.seed = int(seed)
+        self.mean_ = None
+        self.scale_ = None
+        self.model_ = None
+        self.n_features_ = None
+
+    def _check_torch(self):
+        if torch is None or nn is None:
+            raise ImportError("PyTorch is required for ret_model_type='lstm'. Install torch or use ret_model_type='xgboost'.")
+
+    def _standardize_fit(self, X: np.ndarray) -> np.ndarray:
+        self.mean_ = np.nanmean(X, axis=0).astype(np.float32)
+        self.scale_ = np.nanstd(X, axis=0).astype(np.float32)
+        self.scale_[self.scale_ < 1e-8] = 1.0
+        return self._standardize(X)
+
+    def _standardize(self, X: np.ndarray) -> np.ndarray:
+        X = np.asarray(X, dtype=np.float32)
+        X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+        return ((X - self.mean_) / self.scale_).astype(np.float32)
+
+    def _make_sequences(self, X: np.ndarray) -> np.ndarray:
+        X = np.asarray(X, dtype=np.float32)
+        if len(X) == 0:
+            return np.zeros((0, self.seq_len, X.shape[1] if X.ndim == 2 else 0), dtype=np.float32)
+        seqs = []
+        for i in range(len(X)):
+            start = max(0, i - self.seq_len + 1)
+            seq = X[start : i + 1]
+            if len(seq) < self.seq_len:
+                pad = np.repeat(seq[:1], self.seq_len - len(seq), axis=0)
+                seq = np.vstack([pad, seq])
+            seqs.append(seq)
+        return np.stack(seqs).astype(np.float32)
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        self._check_torch()
+        torch.manual_seed(self.seed)
+        np.random.seed(self.seed)
+
+        X = np.asarray(X, dtype=np.float32)
+        y = np.asarray(y, dtype=np.float32)
+        valid = np.isfinite(y)
+        X = X[valid]
+        y = y[valid]
+        if len(X) == 0:
+            raise ValueError("No finite target rows available for LSTM training.")
+
+        Xs = self._standardize_fit(X)
+        seqs = self._make_sequences(Xs)
+        self.n_features_ = int(X.shape[1])
+        self.model_ = _LSTMReturnNet(
+            n_features=self.n_features_,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            dropout=self.dropout,
+        )
+
+        ds_x = torch.tensor(seqs, dtype=torch.float32)
+        ds_y = torch.tensor(y, dtype=torch.float32)
+        dataset = torch.utils.data.TensorDataset(ds_x, ds_y)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
+        opt = torch.optim.Adam(self.model_.parameters(), lr=self.learning_rate)
+        loss_fn = nn.MSELoss()
+
+        self.model_.train()
+        for _ in range(max(1, self.epochs)):
+            for xb, yb in loader:
+                opt.zero_grad()
+                loss = loss_fn(self.model_(xb), yb)
+                loss.backward()
+                opt.step()
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        self._check_torch()
+        if self.model_ is None:
+            raise ValueError("LSTMReturnRegressor has not been fitted.")
+        X = np.asarray(X, dtype=np.float32)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        Xs = self._standardize(X)
+        seqs = self._make_sequences(Xs)
+        self.model_.eval()
+        with torch.no_grad():
+            pred = self.model_(torch.tensor(seqs, dtype=torch.float32)).cpu().numpy()
+        return pred.astype(float)
+
+
+def _fit_xgboost_ret_pack(df_dir: pd.DataFrame, feature_cols: List[str], seed: int) -> RetModelPack:
     """Fit one XGBoost return regressor for a single signal direction."""
     ret_df = df_dir.dropna(subset=["best_return_pct"]).copy()
     X = to_float_matrix(ret_df, feature_cols)
@@ -769,32 +1095,103 @@ def _fit_ret_pack(df_dir: pd.DataFrame, feature_cols: List[str], seed: int) -> R
         n_jobs=4,
     )
     model.fit(X, y)
-    return RetModelPack(feature_cols=feature_cols, model_ret=model)
+    return RetModelPack(feature_cols=feature_cols, model_ret=model, model_type="xgboost")
+
+
+def _fit_lstm_ret_pack(
+    df_dir: pd.DataFrame,
+    feature_cols: List[str],
+    seed: int,
+    *,
+    lstm_seq_len: int = 20,
+    lstm_epochs: int = 30,
+    lstm_hidden_size: int = 64,
+) -> RetModelPack:
+    """Fit one LSTM return regressor for a single signal direction."""
+    ret_df = df_dir.dropna(subset=["best_return_pct"]).copy()
+    if "klu_idx" in ret_df.columns:
+        ret_df = ret_df.sort_values("klu_idx")
+    elif "timestamp" in ret_df.columns:
+        ret_df = ret_df.sort_values("timestamp")
+    X = to_float_matrix(ret_df, feature_cols)
+    y = ret_df["best_return_pct"].to_numpy(dtype=np.float32)
+    model = LSTMReturnRegressor(
+        seq_len=int(lstm_seq_len),
+        hidden_size=int(lstm_hidden_size),
+        epochs=int(lstm_epochs),
+        seed=int(seed),
+    )
+    model.fit(X, y)
+    return RetModelPack(feature_cols=feature_cols, model_ret=model, model_type="lstm")
+
+
+def _fit_ret_pack(
+    df_dir: pd.DataFrame,
+    feature_cols: List[str],
+    seed: int,
+    *,
+    model_type: str = "xgboost",
+    lstm_seq_len: int = 20,
+    lstm_epochs: int = 30,
+    lstm_hidden_size: int = 64,
+) -> RetModelPack:
+    """Fit one 5m return regressor for a single signal direction."""
+    model_type = str(model_type or "xgboost").lower()
+    if model_type in {"xgb", "xgboost"}:
+        return _fit_xgboost_ret_pack(df_dir, feature_cols, seed)
+    if model_type in {"lstm", "torch_lstm"}:
+        return _fit_lstm_ret_pack(
+            df_dir,
+            feature_cols,
+            seed,
+            lstm_seq_len=lstm_seq_len,
+            lstm_epochs=lstm_epochs,
+            lstm_hidden_size=lstm_hidden_size,
+        )
+    raise ValueError(f"Unsupported 5m return model type: {model_type}. Use 'xgboost' or 'lstm'.")
 
 def train_models_two_sided_ret_only(
     bsp_df: pd.DataFrame,
     feature_cols: List[str],
     min_samples_total: int = 300,
+    model_type: str = "xgboost",
+    lstm_seq_len: int = 20,
+    lstm_epochs: int = 30,
+    lstm_hidden_size: int = 64,
 ):
     """Train separate buy and sell 5m return models when enough labeled rows exist."""
     if bsp_df.empty or "direction" not in bsp_df.columns:
         return None, None
 
     df = bsp_df.copy()
-    for c in feature_cols:
-        if c not in df.columns:
-            df[c] = 0.0
+    df = ensure_feature_columns(df, feature_cols)
 
     buy_df = df[df["direction"].astype(str).str.lower() == "buy"].copy()
     sell_df = df[df["direction"].astype(str).str.lower() == "sell"].copy()
 
     buy_pack = None
     if len(buy_df.dropna(subset=["best_return_pct"])) >= min_samples_total:
-        buy_pack = _fit_ret_pack(buy_df, feature_cols, seed=42)
+        buy_pack = _fit_ret_pack(
+            buy_df,
+            feature_cols,
+            seed=42,
+            model_type=model_type,
+            lstm_seq_len=lstm_seq_len,
+            lstm_epochs=lstm_epochs,
+            lstm_hidden_size=lstm_hidden_size,
+        )
 
     sell_pack = None
     if len(sell_df.dropna(subset=["best_return_pct"])) >= min_samples_total:
-        sell_pack = _fit_ret_pack(sell_df, feature_cols, seed=52)
+        sell_pack = _fit_ret_pack(
+            sell_df,
+            feature_cols,
+            seed=52,
+            model_type=model_type,
+            lstm_seq_len=lstm_seq_len,
+            lstm_epochs=lstm_epochs,
+            lstm_hidden_size=lstm_hidden_size,
+        )
 
     return buy_pack, sell_pack
 
@@ -956,16 +1353,12 @@ def choose_thresholds_global_realized(
     events.sort(key=lambda x: int(x["klu_idx"]))
 
     buy_df = prepare_ml_dataset(pd.DataFrame(buy_cand))
-    for c in buy_pack.feature_cols:
-        if c not in buy_df.columns:
-            buy_df[c] = 0.0
+    buy_df = ensure_feature_columns(buy_df, buy_pack.feature_cols)
     buy_pred = buy_pack.model_ret.predict(to_float_matrix(buy_df, buy_pack.feature_cols)).astype(float)
     pred_buy = {(int(buy_cand[i]["klu_idx"]), "buy", str(buy_cand[i].get("bsp_type","?"))): float(buy_pred[i]) for i in range(len(buy_cand))}
 
     sell_df = prepare_ml_dataset(pd.DataFrame(sell_cand))
-    for c in sell_pack.feature_cols:
-        if c not in sell_df.columns:
-            sell_df[c] = 0.0
+    sell_df = ensure_feature_columns(sell_df, sell_pack.feature_cols)
     sell_pred = sell_pack.model_ret.predict(to_float_matrix(sell_df, sell_pack.feature_cols)).astype(float)
     pred_sell = {(int(sell_cand[i]["klu_idx"]), "sell", str(sell_cand[i].get("bsp_type","?"))): float(sell_pred[i]) for i in range(len(sell_cand))}
 
@@ -1197,6 +1590,7 @@ def pack_ret_modelpack_for_save(pack):
         "__type__": "RetModelPack",
         "feature_cols": list(pack.feature_cols),
         "model_ret": pack.model_ret,
+        "model_type": getattr(pack, "model_type", "xgboost"),
     }
 
 def unpack_ret_modelpack_from_load(obj):
@@ -1207,6 +1601,7 @@ def unpack_ret_modelpack_from_load(obj):
         return RetModelPack(
             feature_cols=list(obj["feature_cols"]),
             model_ret=obj["model_ret"],
+            model_type=str(obj.get("model_type", "xgboost")),
         )
     return obj
 
@@ -1361,6 +1756,10 @@ def run_daily_bandit_then_5m_xgb(
     lookahead_days_5m: float = 2.0,
     retrain_every_days_5m: int = 5,
     min_samples_total_5m: int = 300,
+    ret_model_type: str = "xgboost",
+    lstm_seq_len: int = 20,
+    lstm_epochs: int = 30,
+    lstm_hidden_size: int = 64,
 
     threshold_window_days: float = 2.0,
     threshold_ret_grid=None,
@@ -1381,7 +1780,7 @@ def run_daily_bandit_then_5m_xgb(
     checkpoint_every_n_days: int = 1,
     resume_from_checkpoint_path: str | None = None,
 ):
-    """Run or resume the legacy daily-bandit gate plus 5m XGBoost trading strategy."""
+    """Run or resume the legacy daily-bandit gate plus selectable 5m return model."""
     os.makedirs(output_dir, exist_ok=True)
 
     if macro_files is None:
@@ -1723,7 +2122,12 @@ def run_daily_bandit_then_5m_xgb(
                 bsp_rows_daily.append(rr)
 
         ends = compute_chain_endpoints(bsp_rows_daily)
-        regime = regime_for_day_from_ends(day, ends)
+        regime = regime_for_day_from_ends(
+            day,
+            ends,
+            bsp_rows=bsp_rows_daily,
+            current_close=r.get("_close", np.nan),
+        )
         base_dir_today = latest_bsp_dir_up_to(bsp_rows_daily, ts)
 
         p_val = np.nan
@@ -1770,10 +2174,14 @@ def run_daily_bandit_then_5m_xgb(
             if y is None:
                 continue
 
-            ends_j = compute_chain_endpoints([b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= t0])
-            regime_j = regime_for_day_from_ends(t0.normalize(), ends_j)
-
             bsp_hist_j = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= t0]
+            ends_j = compute_chain_endpoints(bsp_hist_j)
+            regime_j = regime_for_day_from_ends(
+                t0.normalize(),
+                ends_j,
+                bsp_rows=bsp_hist_j,
+                current_close=df_day_feat.loc[j].get("_close", np.nan),
+            )
             feat_j = make_daily_features_one_model(
                 kline_row=df_day_feat.loc[j],
                 bsp_hist_up_to_day=bsp_hist_j,
@@ -1813,7 +2221,12 @@ def run_daily_bandit_then_5m_xgb(
             day = ts.normalize()
 
             ends = compute_chain_endpoints([b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts])
-            regime = regime_for_day_from_ends(day, ends)
+            regime = regime_for_day_from_ends(
+                day,
+                ends,
+                bsp_rows=[b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts],
+                current_close=r.get("_close", np.nan),
+            )
             base_dir = latest_bsp_dir_up_to(bsp_rows_daily, ts)
             bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts]
 
@@ -1860,7 +2273,15 @@ def run_daily_bandit_then_5m_xgb(
             return
         dfb2 = prepare_ml_dataset(dfb)
         feat_cols = get_feature_columns(dfb2)
-        bp, sp = train_models_two_sided_ret_only(dfb2, feat_cols, min_samples_total=min_samples_total_5m)
+        bp, sp = train_models_two_sided_ret_only(
+            dfb2,
+            feat_cols,
+            min_samples_total=min_samples_total_5m,
+            model_type=ret_model_type,
+            lstm_seq_len=lstm_seq_len,
+            lstm_epochs=lstm_epochs,
+            lstm_hidden_size=lstm_hidden_size,
+        )
         if bp is not None:
             buy_pack = bp
         if sp is not None:
@@ -1868,7 +2289,10 @@ def run_daily_bandit_then_5m_xgb(
         if (bp is not None) or (sp is not None):
             last_train_day = day_ts
             if verbose:
-                print(f"[TRAIN][5M] asof={day_ts.date()} feats={len(feat_cols)} buy={'YES' if bp else 'NO'} sell={'YES' if sp else 'NO'} rows={len(dfb2)}")
+                print(
+                    f"[TRAIN][5M] model={ret_model_type} asof={day_ts.date()} feats={len(feat_cols)} "
+                    f"buy={'YES' if bp else 'NO'} sell={'YES' if sp else 'NO'} rows={len(dfb2)}"
+                )
 
     def maybe_opt_thresholds(asof_bar_idx: int):
         """Refresh legacy 5m buy/sell thresholds from recent realized replay."""
@@ -1913,7 +2337,12 @@ def run_daily_bandit_then_5m_xgb(
 
         bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= ts]
         ends = compute_chain_endpoints(bsp_hist)
-        regime = regime_for_day_from_ends(day, ends)
+        regime = regime_for_day_from_ends(
+            day,
+            ends,
+            bsp_rows=bsp_hist,
+            current_close=r.get("_close", np.nan),
+        )
         base_dir = latest_bsp_dir_up_to(bsp_hist, ts)
 
         p_day_val, p_day_source_date = latest_prior_probability_for_day(p_by_day, day)
@@ -1941,7 +2370,12 @@ def run_daily_bandit_then_5m_xgb(
         source_day = source_ts.normalize()
         source_bsp_hist = [b for b in bsp_rows_daily if pd.to_datetime(b["timestamp"]) <= source_ts]
         source_ends = compute_chain_endpoints(source_bsp_hist)
-        source_regime = regime_for_day_from_ends(source_day, source_ends)
+        source_regime = regime_for_day_from_ends(
+            source_day,
+            source_ends,
+            bsp_rows=source_bsp_hist,
+            current_close=source_row.get("_close", np.nan),
+        )
         source_base_dir = latest_bsp_dir_up_to(source_bsp_hist, source_ts)
         dp_min = float(dp_vs_minK_series[source_i_day]) if np.isfinite(dp_vs_minK_series[source_i_day]) else 0.0
         dp_max = float(dp_vs_maxK_series[source_i_day]) if np.isfinite(dp_vs_maxK_series[source_i_day]) else 0.0
@@ -2141,9 +2575,7 @@ def run_daily_bandit_then_5m_xgb(
 
             if d == "buy" and engine.pos == 0 and buy_pack is not None:
                 row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in buy_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_feature_columns(row_df, buy_pack.feature_cols)
                 pr = predict_ret(buy_pack, row_df)
                 if pr >= float(buy_ret_th_live):
                     engine.place_order_for_next_bar(
@@ -2163,9 +2595,7 @@ def run_daily_bandit_then_5m_xgb(
 
             elif d == "sell" and engine.pos == 1 and sell_pack is not None:
                 row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in sell_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_feature_columns(row_df, sell_pack.feature_cols)
                 pr = predict_ret(sell_pack, row_df)
                 if pr >= float(sell_ret_th_live):
                     engine.place_order_for_next_bar(

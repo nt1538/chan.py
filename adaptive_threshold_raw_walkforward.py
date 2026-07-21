@@ -53,6 +53,15 @@ from pipelineCurrent import (
 )
 
 
+def ensure_columns_once(df: pd.DataFrame, columns: List[str], fill_value: float = 0.0) -> pd.DataFrame:
+    """Add missing columns in one batch to avoid pandas fragmentation warnings."""
+    missing = [c for c in columns if c not in df.columns]
+    if not missing:
+        return df
+    fill = pd.DataFrame(fill_value, index=df.index, columns=missing)
+    return pd.concat([df, fill], axis=1).copy()
+
+
 def latest_p_day_before(p_by_day: Dict[pd.Timestamp, float], day: pd.Timestamp) -> tuple[float, Optional[pd.Timestamp]]:
     """Return the latest finite daily probability strictly before day."""
     day = pd.to_datetime(day).normalize()
@@ -128,10 +137,7 @@ def simulate_one_day_under_gate_from_events(
                 continue
 
             if d == "buy" and eng.pos == 0 and buy_pack is not None:
-                row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in buy_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_columns_once(prepare_ml_dataset(pd.DataFrame([r])), buy_pack.feature_cols)
                 pr = predict_ret(buy_pack, row_df)
                 if pr >= float(buy_ret_th_live):
                     eng.place_order_for_next_bar(
@@ -144,10 +150,7 @@ def simulate_one_day_under_gate_from_events(
                         must_trade_dir = None
 
             elif d == "sell" and eng.pos == 1 and sell_pack is not None:
-                row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in sell_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_columns_once(prepare_ml_dataset(pd.DataFrame([r])), sell_pack.feature_cols)
                 pr = predict_ret(sell_pack, row_df)
                 if pr >= float(sell_ret_th_live):
                     eng.place_order_for_next_bar(
@@ -733,10 +736,7 @@ def run_raw_adaptive_threshold_walkforward(
                 continue
 
             if d == "buy" and engine.pos == 0 and buy_pack is not None:
-                row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in buy_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_columns_once(prepare_ml_dataset(pd.DataFrame([r])), buy_pack.feature_cols)
                 pr = predict_ret(buy_pack, row_df)
                 if pr >= float(buy_ret_th_live):
                     engine.place_order_for_next_bar(
@@ -756,10 +756,7 @@ def run_raw_adaptive_threshold_walkforward(
                         must_trade_dir = None
 
             elif d == "sell" and engine.pos == 1 and sell_pack is not None:
-                row_df = prepare_ml_dataset(pd.DataFrame([r]))
-                for cc in sell_pack.feature_cols:
-                    if cc not in row_df.columns:
-                        row_df[cc] = 0.0
+                row_df = ensure_columns_once(prepare_ml_dataset(pd.DataFrame([r])), sell_pack.feature_cols)
                 pr = predict_ret(sell_pack, row_df)
                 if pr >= float(sell_ret_th_live):
                     engine.place_order_for_next_bar(

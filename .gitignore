@@ -9,9 +9,46 @@ OpenConfig.yaml
 gotify_push.py
 cos_config.yaml
 qlib-env/
+node_modules/
+outputs/trading_template/node_modules/
+outputs/trading_template/.pnpm-store/
 
 # Generated market data update folders
 DataAPI/data/index_update_month_1day_qjk5ivq/
 DataAPI/data/etf_update_month_1day_adjsplit_qmigryf/
 DataAPI/data/etf_update_month_5min_adjsplit_fnso3dw/
 DataAPI/data/index_update_month_5min_qjk5ivq/
+
+# Local/runtime temp folders
+.codex_tmp*/
+outputs/tmp_render/
+**/soffice_profile_*/
+**/soffice_convert_*/
+
+# Model checkpoints and generated ML artifacts
+checkpoints/**/*.joblib
+checkpoints/**/*.tmp
+*.joblib
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.xgb
+
+# Backtest/simulation outputs
+output*/
+outputs/*.png
+outputs/*.csv
+daily_log*.csv
+daily_reward_log*.csv
+daily_lr_feature_importance.csv
+signal_decisions*.csv
+trades_with_gate_rewards.csv
+trade_signals*.csv
+
+# Generated reports/docs from local analysis
+*.docx
+*.pptx
+*.xlsx
+5min_*feature_importance*.csv
+*_feature_importance*.csv

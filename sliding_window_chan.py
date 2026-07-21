@@ -153,9 +153,9 @@ class SlidingWindowChan:
         return getattr(klu, "idx", 0)
 
     def _add_klu_indicators(self, snapshot: Dict, klu: CKLine_Unit):
-        """Add technical indicators from K-line to snapshot."""
-        def safe_get(obj, attr, default=0.0):
-            """Read optional indicator attributes without breaking snapshot export."""
+        """Add one canonical copy of every K-line indicator used by BSP features."""
+        def safe_get(obj, attr, default=None):
+            """Return None when an indicator is genuinely unavailable; never invent a value."""
             try:
                 val = getattr(obj, attr, default)
                 return default if val is None else val
@@ -164,36 +164,36 @@ class SlidingWindowChan:
         
         # MACD
         if hasattr(klu, 'macd') and klu.macd:
-            snapshot['macd_value'] = safe_get(klu.macd, 'macd', 0.0)
-            snapshot['macd_dif'] = safe_get(klu.macd, 'DIF', 0.0)
-            snapshot['macd_dea'] = safe_get(klu.macd, 'DEA', 0.0)
+            snapshot['macd_value'] = safe_get(klu.macd, 'macd')
+            snapshot['macd_diff'] = safe_get(klu.macd, 'DIF')
+            snapshot['macd_dea'] = safe_get(klu.macd, 'DEA')
         else:
-            snapshot['macd_value'] = 0.0
-            snapshot['macd_dif'] = 0.0
-            snapshot['macd_dea'] = 0.0
+            snapshot['macd_value'] = None
+            snapshot['macd_diff'] = None
+            snapshot['macd_dea'] = None
         
         # RSI
-        snapshot['rsi'] = safe_get(klu, 'rsi', 50.0) if hasattr(klu, 'rsi') else 50.0
+        snapshot['rsi'] = safe_get(klu, 'rsi')
         
         # KDJ
         if hasattr(klu, 'kdj') and klu.kdj:
-            snapshot['kdj_k'] = safe_get(klu.kdj, 'k', 50.0)
-            snapshot['kdj_d'] = safe_get(klu.kdj, 'd', 50.0)
-            snapshot['kdj_j'] = safe_get(klu.kdj, 'j', 50.0)
+            snapshot['kdj_k'] = safe_get(klu.kdj, 'k')
+            snapshot['kdj_d'] = safe_get(klu.kdj, 'd')
+            snapshot['kdj_j'] = safe_get(klu.kdj, 'j')
         else:
-            snapshot['kdj_k'] = 50.0
-            snapshot['kdj_d'] = 50.0
-            snapshot['kdj_j'] = 50.0
+            snapshot['kdj_k'] = None
+            snapshot['kdj_d'] = None
+            snapshot['kdj_j'] = None
         
         # DMI
         if hasattr(klu, 'dmi') and klu.dmi:
-            snapshot['dmi_plus'] = safe_get(klu.dmi, 'plus_di', 25.0)
-            snapshot['dmi_minus'] = safe_get(klu.dmi, 'minus_di', 25.0)
-            snapshot['dmi_adx'] = safe_get(klu.dmi, 'adx', 25.0)
+            snapshot['dmi_plus'] = safe_get(klu.dmi, 'plus_di')
+            snapshot['dmi_minus'] = safe_get(klu.dmi, 'minus_di')
+            snapshot['dmi_adx'] = safe_get(klu.dmi, 'adx')
         else:
-            snapshot['dmi_plus'] = 25.0
-            snapshot['dmi_minus'] = 25.0
-            snapshot['dmi_adx'] = 25.0
+            snapshot['dmi_plus'] = None
+            snapshot['dmi_minus'] = None
+            snapshot['dmi_adx'] = None
         
         # Price action (no future info; only current bar)
         open_val = klu.open if klu.open else klu.close
@@ -211,6 +211,20 @@ class SlidingWindowChan:
     def _create_bsp_snapshot(self, bsp: CBS_Point, bs_type_str: str, snapshot_idx: int) -> Dict:
         """Create a complete snapshot of BSP with all features."""
         klu = bsp.klu
+
+        def direction_name(line) -> Optional[str]:
+            """Return a stable up/down label for a Chan Bi or segment."""
+            if line is None:
+                return None
+            direction = getattr(line, "dir", None)
+            if direction is None:
+                return None
+            name = getattr(direction, "name", str(direction)).lower()
+            if name.endswith(".up"):
+                return "up"
+            if name.endswith(".down"):
+                return "down"
+            return name
         
         def safe_get(obj, attr, default=0.0):
             """Read optional BSP/K-line attributes with a stable default."""
@@ -223,6 +237,11 @@ class SlidingWindowChan:
         # Original index in full dataset (we now trust klu.idx)
         original_klu_idx = self._find_original_klu_idx(klu)
         
+        bsp_line = getattr(bsp, "bi", None)
+        # A segment-level BSP points at a CSeg; otherwise it points at a CBi.
+        bi = getattr(bsp_line, "end_bi", None) if hasattr(bsp_line, "end_bi") else bsp_line
+        segment = bsp_line if hasattr(bsp_line, "end_bi") else getattr(bi, "parent_seg", None)
+
         snapshot = {
             'klu_idx': original_klu_idx,  # Original position in full dataset
             'timestamp': str(klu.time),
@@ -235,17 +254,26 @@ class SlidingWindowChan:
             'bsp_types': bsp.type2str(),
             'is_buy': int(bsp.is_buy),
             'direction': 'buy' if bsp.is_buy else 'sell',
+            'bi_direction': direction_name(bi),
+            'segment_direction': direction_name(segment),
             'is_segbsp': safe_get(bsp, 'is_segbsp', False),
         }
         
-        # Add features from BSP
+        # These BSP feature-dict values duplicate K-line fields.  Export only the
+        # canonical unprefixed copy populated by _add_klu_indicators below.
+        duplicate_klu_features = {
+            'macd_value', 'macd_dea', 'macd_diff',
+            'rsi', 'kdj_k', 'kdj_d', 'kdj_j', 'volume',
+        }
+
+        # Add every unique structural BSP feature.
         if bsp.features:
             try:
                 features = bsp.features.to_dict()
                 for key, value in features.items():
-                    if key == 'next_bi_return':
+                    if key == 'next_bi_return' or key in duplicate_klu_features:
                         continue
-                    snapshot[f'feat_{key}'] = 0.0 if value is None else value
+                    snapshot[f'feat_{key}'] = value
             except Exception as e:
                 print(f"[Warning] Error extracting features: {e}")
         
