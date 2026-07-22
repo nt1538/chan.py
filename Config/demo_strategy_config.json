@@ -1,0 +1,19 @@
+{
+  "strategy": {
+    "entry_segment_directions": ["up"],
+    "required_sell_signals": 3,
+    "sell_lookback_bars": 8,
+    "exit_on_down_segment": true,
+    "position_fraction": 1.0
+  },
+  "risk": {
+    "stop_loss_pct": 0.03,
+    "take_profit_pct": 0.08,
+    "trailing_stop_pct": 0.025
+  },
+  "backtest": {
+    "initial_capital": 100000,
+    "fee_pct": 0.0000,
+    "slippage_pct": 0.0000
+  }
+}
