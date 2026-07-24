@@ -51,7 +51,11 @@ class ChanSignal:
             price=float(price),
             bi_direction=_optional_text(row.get("bi_direction")),
             segment_direction=segment_direction,
-            segment_confirmed=segment_direction in {"up", "down"},
+            segment_confirmed=(
+                bool(row.get("segment_confirmed"))
+                if row.get("segment_confirmed") is not None and not pd.isna(row.get("segment_confirmed"))
+                else segment_direction in {"up", "down"}
+            ),
             snapshot_first_seen=(
                 None if pd.isna(row.get("snapshot_first_seen"))
                 else int(row.get("snapshot_first_seen"))
