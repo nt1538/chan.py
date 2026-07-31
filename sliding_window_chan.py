@@ -208,7 +208,13 @@ class SlidingWindowChan:
         snapshot['body_size'] = abs(close_val - open_val)
         snapshot['is_bullish_candle'] = 1 if close_val > open_val else 0
 
-    def _create_bsp_snapshot(self, bsp: CBS_Point, bs_type_str: str, snapshot_idx: int) -> Dict:
+    def _create_bsp_snapshot(
+        self,
+        bsp: CBS_Point,
+        bs_type_str: str,
+        snapshot_idx: int,
+        chan: CChan | None = None,
+    ) -> Dict:
         """Create a complete snapshot of BSP with all features."""
         klu = bsp.klu
 
@@ -242,6 +248,34 @@ class SlidingWindowChan:
         bi = getattr(bsp_line, "end_bi", None) if hasattr(bsp_line, "end_bi") else bsp_line
         segment = bsp_line if hasattr(bsp_line, "end_bi") else getattr(bi, "parent_seg", None)
 
+        # A Bi in the currently-forming (virtual) segment may not have
+        # ``parent_seg`` linked yet.  Its point-in-time ``seg_idx`` still tells
+        # us which segment currently owns it, so use that segment's present
+        # direction without waiting for confirmation.
+        if segment is None and bi is not None and chan is not None:
+            seg_idx = getattr(bi, "seg_idx", None)
+            try:
+                seg_list = chan.kl_datas[self.lv_list[0]].seg_list
+                if seg_idx is not None and 0 <= int(seg_idx) < len(seg_list):
+                    segment = seg_list[int(seg_idx)]
+                else:
+                    # During virtual-segment formation, seg_idx/parent_seg can
+                    # lag the segment list update. Resolve ownership directly
+                    # from the segment's current Bi range.
+                    for candidate in reversed(seg_list):
+                        if candidate.start_bi.idx <= bi.idx <= candidate.end_bi.idx:
+                            segment = candidate
+                            break
+                    if (
+                        segment is None
+                        and len(seg_list) > 0
+                        and not seg_list[-1].is_sure
+                        and bi.idx >= seg_list[-1].start_bi.idx
+                    ):
+                        segment = seg_list[-1]
+            except (AttributeError, KeyError, TypeError, ValueError):
+                segment = None
+
         snapshot = {
             'klu_idx': original_klu_idx,  # Original position in full dataset
             'timestamp': str(klu.time),
@@ -256,6 +290,11 @@ class SlidingWindowChan:
             'direction': 'buy' if bsp.is_buy else 'sell',
             'bi_direction': direction_name(bi),
             'segment_direction': direction_name(segment),
+            'segment_is_sure': (
+                bool(getattr(segment, "is_sure", False))
+                if segment is not None
+                else None
+            ),
             'is_segbsp': safe_get(bsp, 'is_segbsp', False),
         }
         
@@ -308,7 +347,8 @@ class SlidingWindowChan:
                     bsp_snapshot = self._create_bsp_snapshot(
                         bsp=bsp,
                         bs_type_str=bs_type_str,
-                        snapshot_idx=snapshot_idx
+                        snapshot_idx=snapshot_idx,
+                        chan=chan,
                     )
                     
                     if bsp_key in self.all_historical_bsp:
