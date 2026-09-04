@@ -289,6 +289,11 @@ class SlidingWindowChan:
             'is_buy': int(bsp.is_buy),
             'direction': 'buy' if bsp.is_buy else 'sell',
             'bi_direction': direction_name(bi),
+            'bi_is_sure': (
+                bool(getattr(bi, "is_sure", False))
+                if bi is not None
+                else None
+            ),
             'segment_direction': direction_name(segment),
             'segment_is_sure': (
                 bool(getattr(segment, "is_sure", False))

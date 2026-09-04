@@ -19,6 +19,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 
 from ChanConfig import CChanConfig
@@ -1716,6 +1717,1472 @@ def save_virtual_bsp_candidates_to_excel(
     return target.resolve()
 
 
+def plot_virtual_bsp_candidates_from_excel(
+    config: RealisticSimulationConfig | None = None,
+    virtual_bsp_path: str | Path = "outputs/TQQQ_virtual_bsp_candidates.xlsx",
+    path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    show: bool = True,
+    count_frequency: str = "D",
+    max_background_points: int = 75_000,
+) -> Path | None:
+    """Plot saved virtual BSP candidates without regenerating Chan data.
+
+    The upper panel shows candidates on the underlying close-price series.  The
+    lower panel shows Buy and Sell candidate counts by ``count_frequency``.
+    """
+
+    import matplotlib.pyplot as plt
+
+    if int(max_background_points) <= 0:
+        raise ValueError("max_background_points must be greater than zero")
+    cfg = config or RealisticSimulationConfig()
+    candidates = pd.read_excel(
+        virtual_bsp_path, sheet_name="Virtual BSP Candidates"
+    )
+    required = {"bsp_timestamp", "direction", "klu_close"}
+    missing = required.difference(candidates.columns)
+    if missing:
+        raise KeyError(
+            f"Virtual BSP workbook is missing columns: {sorted(missing)}"
+        )
+    candidates["bsp_timestamp"] = pd.to_datetime(
+        candidates["bsp_timestamp"], errors="raise"
+    )
+    candidates["direction"] = candidates["direction"].astype(str).str.lower()
+    candidates["klu_close"] = pd.to_numeric(
+        candidates["klu_close"], errors="raise"
+    )
+
+    raw = _load_ohlcv_csv(cfg.data_path)
+    period_start = (
+        pd.Timestamp(start)
+        if start is not None
+        else candidates["bsp_timestamp"].min()
+    )
+    period_end = (
+        pd.Timestamp(end)
+        if end is not None
+        else candidates["bsp_timestamp"].max()
+    )
+    if pd.isna(period_start) or pd.isna(period_end):
+        raise ValueError("The virtual BSP workbook contains no candidates")
+    if period_end < period_start:
+        raise ValueError("end must be greater than or equal to start")
+
+    price = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both"),
+        ["timestamp", "_close"],
+    ].rename(columns={"_close": "close"})
+    candidates = candidates.loc[
+        candidates["bsp_timestamp"].between(
+            period_start, period_end, inclusive="both"
+        )
+    ].copy()
+    if price.empty:
+        raise ValueError("No price rows exist in the requested plot period")
+
+    stride = max(1, len(price) // int(max_background_points))
+    price_plot = price.iloc[::stride]
+    colors = {"buy": "#16803C", "sell": "#C33C3C"}
+    markers = {"buy": "^", "sell": "v"}
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(20, 12),
+        sharex=True,
+        gridspec_kw={"height_ratios": [3, 1]},
+    )
+    axes[0].plot(
+        price_plot["timestamp"],
+        price_plot["close"],
+        color="#62748A",
+        linewidth=0.7,
+        label=f"{cfg.chan.code.upper()} close",
+        zorder=1,
+    )
+    for direction in ("buy", "sell"):
+        group = candidates.loc[candidates["direction"] == direction]
+        if group.empty:
+            continue
+        axes[0].scatter(
+            group["bsp_timestamp"],
+            group["klu_close"],
+            color=colors[direction],
+            marker=markers[direction],
+            s=25,
+            alpha=0.8,
+            label=f"Virtual {direction.title()} ({len(group):,})",
+            zorder=3,
+        )
+    axes[0].set_ylabel("Price")
+    axes[0].set_title(f"Possible virtual BSPs: {len(candidates):,}")
+    axes[0].grid(alpha=0.2)
+    axes[0].legend(loc="best")
+
+    counts = (
+        candidates.groupby(
+            [pd.Grouper(key="bsp_timestamp", freq=count_frequency), "direction"]
+        )
+        .size()
+        .unstack("direction", fill_value=0)
+    )
+    for direction in ("buy", "sell"):
+        if direction not in counts.columns:
+            counts[direction] = 0
+    bar_width = 0.8
+    if len(counts.index) > 1:
+        bar_width = max(
+            0.01,
+            0.8 * (counts.index[1] - counts.index[0]).total_seconds() / 86_400,
+        )
+    axes[1].bar(
+        counts.index,
+        counts["buy"],
+        width=bar_width,
+        color=colors["buy"],
+        alpha=0.75,
+        label="Buy count",
+    )
+    axes[1].bar(
+        counts.index,
+        -counts["sell"],
+        width=bar_width,
+        color=colors["sell"],
+        alpha=0.75,
+        label="Sell count",
+    )
+    axes[1].axhline(0, color="#62748A", linewidth=0.7)
+    axes[1].set_ylabel(f"Count / {count_frequency}\nSell shown below zero")
+    axes[1].set_xlabel("Candidate detection timestamp")
+    axes[1].grid(axis="y", alpha=0.2)
+    axes[1].legend(loc="best")
+
+    fig.suptitle(
+        f"{cfg.chan.code.upper()} virtual BSP candidates: "
+        f"{period_start} to {period_end}",
+        fontsize=14,
+    )
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    saved_path: Path | None = None
+    if path is not None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(target, dpi=180, bbox_inches="tight")
+        saved_path = target.resolve()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return saved_path
+
+
+def plot_virtual_bspoints_from_excel(
+    config: RealisticSimulationConfig,
+    virtual_bsp_path: str | Path | None = None,
+    path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    show: bool = True,
+    annotate: bool = False,
+    max_background_points: int = 75_000,
+) -> Path | None:
+    """Show every saved virtual Buy/Sell point in one requested period."""
+
+    import matplotlib.pyplot as plt
+
+    if int(max_background_points) <= 0:
+        raise ValueError("max_background_points must be greater than zero")
+    workbook_path = virtual_bsp_path or config.bsp_workbook_path
+    candidates = pd.read_excel(
+        workbook_path, sheet_name="Virtual BSP Candidates"
+    )
+    required = {"bsp_timestamp", "direction", "klu_close"}
+    missing = required.difference(candidates.columns)
+    if missing:
+        raise KeyError(
+            f"Virtual BSP workbook is missing columns: {sorted(missing)}"
+        )
+    candidates["bsp_timestamp"] = pd.to_datetime(
+        candidates["bsp_timestamp"], errors="raise"
+    )
+    candidates["direction"] = candidates["direction"].astype(str).str.lower()
+    candidates["klu_close"] = pd.to_numeric(
+        candidates["klu_close"], errors="raise"
+    )
+    period_start = (
+        pd.Timestamp(start)
+        if start is not None
+        else candidates["bsp_timestamp"].min()
+    )
+    period_end = (
+        pd.Timestamp(end)
+        if end is not None
+        else candidates["bsp_timestamp"].max()
+    )
+    if pd.isna(period_start) or pd.isna(period_end):
+        raise ValueError("The virtual BSP workbook contains no candidates")
+    if period_end < period_start:
+        raise ValueError("end must be greater than or equal to start")
+    candidates = candidates.loc[
+        candidates["bsp_timestamp"].between(
+            period_start, period_end, inclusive="both"
+        )
+    ].copy()
+
+    raw = _load_ohlcv_csv(config.data_path)
+    price = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both"),
+        ["timestamp", "_close"],
+    ].rename(columns={"_close": "close"})
+    if price.empty:
+        raise ValueError("No price rows exist in the requested plot period")
+    stride = max(1, len(price) // int(max_background_points))
+    price_plot = price.iloc[::stride]
+
+    colors = {"buy": "#16803C", "sell": "#C33C3C"}
+    markers = {"buy": "^", "sell": "v"}
+    fig, ax = plt.subplots(figsize=(20, 8))
+    ax.plot(
+        price_plot["timestamp"],
+        price_plot["close"],
+        color="#62748A",
+        linewidth=0.7,
+        label=f"{config.chan.code.upper()} close",
+        zorder=1,
+    )
+    for direction in ("buy", "sell"):
+        group = candidates.loc[candidates["direction"] == direction]
+        if group.empty:
+            continue
+        ax.scatter(
+            group["bsp_timestamp"],
+            group["klu_close"],
+            color=colors[direction],
+            marker=markers[direction],
+            s=35,
+            alpha=0.85,
+            label=f"{direction.title()} BSP ({len(group):,})",
+            zorder=3,
+        )
+        if annotate:
+            for _, event in group.iterrows():
+                ax.annotate(
+                    direction[0].upper(),
+                    (event["bsp_timestamp"], event["klu_close"]),
+                    xytext=(0, 7 if direction == "buy" else -10),
+                    textcoords="offset points",
+                    ha="center",
+                    fontsize=7,
+                    color=colors[direction],
+                )
+    ax.set_title(
+        f"{config.chan.code.upper()} virtual BSPs: {period_start} to {period_end} "
+        f"({len(candidates):,} points)"
+    )
+    ax.set_xlabel("BSP timestamp")
+    ax.set_ylabel("Price")
+    ax.grid(alpha=0.2)
+    ax.legend(loc="best")
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    saved_path: Path | None = None
+    if path is not None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(target, dpi=180, bbox_inches="tight")
+        saved_path = target.resolve()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return saved_path
+
+
+def _chan_geometry_at_timestamp(
+    raw: pd.DataFrame,
+    chan_config: ChanSimulationConfig,
+    timestamp: pd.Timestamp,
+) -> dict[str, list]:
+    """Rebuild a local point-in-time Chan snapshot for plotting geometry."""
+
+    positions = raw.index[raw["timestamp"] <= timestamp]
+    if len(positions) == 0:
+        return {"bis": [], "segments": [], "zones": []}
+    end_pos = int(positions[-1])
+    replay = raw.iloc[
+        max(0, end_pos - max(chan_config.warmup_bars, chan_config.max_klines)) : end_pos + 1
+    ]
+    c = CChanConfig(
+        {
+            "trigger_step": chan_config.trigger_step,
+            "cal_rsi": chan_config.cal_rsi,
+            "cal_kdj": chan_config.cal_kdj,
+            "cal_dmi": chan_config.cal_dmi,
+        }
+    )
+    chan = _SimulationSlidingWindowChan(
+        code=chan_config.code,
+        data_src=DATA_SRC.CSV,
+        lv_list=[_kl_type(chan_config.frequency)],
+        config=c,
+        autype=AUTYPE.QFQ,
+        max_klines=chan_config.max_klines,
+    )
+    for _, row in replay.iterrows():
+        chan.process_new_kline(
+            _build_klu(
+                row["timestamp"], row["_open"], row["_high"], row["_low"],
+                row["_close"], row.get("_vol", 0.0)
+            )
+        )
+    if chan.last_chan is None:
+        return {"bis": [], "segments": [], "zones": []}
+    kl_data = chan.last_chan.kl_datas[_kl_type(chan_config.frequency)]
+    bis = [
+        (
+            pd.Timestamp(str(bi.get_begin_klu().time)),
+            float(bi.get_begin_val()),
+            pd.Timestamp(str(bi.get_end_klu().time)),
+            float(bi.get_end_val()),
+            bool(bi.is_sure() if callable(getattr(bi, "is_sure", None)) else bi.is_sure),
+        )
+        for bi in kl_data.bi_list
+    ]
+    segments = [
+        (
+            pd.Timestamp(str(seg.get_begin_klu().time)),
+            float(seg.get_begin_val()),
+            pd.Timestamp(str(seg.get_end_klu().time)),
+            float(seg.get_end_val()),
+            bool(seg.is_sure),
+        )
+        for seg in kl_data.seg_list
+    ]
+    zone_objects = list(kl_data.zs_list)
+    for seg in kl_data.seg_list:
+        zone_objects.extend(seg.zs_lst)
+    zones = []
+    seen_zones = set()
+    for zs in zone_objects:
+        zone = (
+            pd.Timestamp(str(zs.begin.time)),
+            pd.Timestamp(str(zs.end.time)),
+            float(zs.low),
+            float(zs.high),
+            bool(zs.is_sure),
+        )
+        key = zone[:4]
+        if key not in seen_zones:
+            seen_zones.add(key)
+            zones.append(zone)
+    return {"bis": bis, "segments": segments, "zones": zones}
+
+
+_BSP_PLOT_THRESHOLD_COLUMNS: dict[str, dict[str, str]] = {
+    "1": {
+        "divergence_rate": "feat_divergence_rate", "bi_amp": "feat_bsp1_bi_amp",
+        "bi_amp_rate": "feat_bsp1_bi_amp_rate", "bi_klu_cnt": "feat_bsp1_bi_klu_cnt",
+        "zs_cnt": "feat_zs_cnt",
+    },
+    "1p": {
+        "divergence_rate": "feat_divergence_rate", "bi_amp": "feat_bsp1_bi_amp",
+        "bi_amp_rate": "feat_bsp1_bi_amp_rate", "bi_klu_cnt": "feat_bsp1_bi_klu_cnt",
+    },
+    "2": {
+        "retrace_rate": "feat_bsp2_retrace_rate", "break_bi_amp": "feat_bsp2_break_bi_amp",
+        "break_bi_amp_rate": "feat_bsp2_break_bi_amp_rate",
+        "break_bi_klu_cnt": "feat_bsp2_break_bi_bi_klu_cnt",
+        "bi_amp": "feat_bsp2_bi_amp", "bi_amp_rate": "feat_bsp2_bi_amp_rate",
+        "bi_klu_cnt": "feat_bsp2_bi_klu_cnt",
+    },
+    "2s": {
+        "retrace_rate": "feat_bsp2s_retrace_rate", "break_bi_amp": "feat_bsp2s_break_bi_amp",
+        "break_bi_amp_rate": "feat_bsp2s_break_bi_amp_rate",
+        "break_bi_klu_cnt": "feat_bsp2s_break_bi_klu_cnt",
+        "bi_amp": "feat_bsp2s_bi_amp", "bi_amp_rate": "feat_bsp2s_bi_amp_rate",
+        "bi_klu_cnt": "feat_bsp2s_bi_klu_cnt", "level": "feat_bsp2s_lv",
+    },
+    "3a": {
+        "zs_height": "feat_bsp3_zs_height", "bi_amp": "feat_bsp3_bi_amp",
+        "bi_amp_rate": "feat_bsp3_bi_amp_rate", "bi_klu_cnt": "feat_bsp3_bi_klu_cnt",
+    },
+    "3b": {
+        "zs_height": "feat_bsp3_zs_height", "bi_amp": "feat_bsp3_bi_amp",
+        "bi_amp_rate": "feat_bsp3_bi_amp_rate", "bi_klu_cnt": "feat_bsp3_bi_klu_cnt",
+    },
+}
+
+
+def _apply_bsp_plot_type_thresholds(
+    bsp: pd.DataFrame,
+    type_thresholds: dict[str, dict] | None,
+) -> tuple[pd.DataFrame, dict[str, tuple[int, int]]]:
+    """Apply min/max rules only to their corresponding BSP type.
+
+    Friendly rules use names such as ``min_divergence_rate``. Direct workbook
+    columns can use ``{"feat_rsi": {"min": 20, "max": 80}}``.
+    Numeric NaN values do not pass an active threshold.
+    """
+    if not type_thresholds:
+        return bsp, {}
+    result = bsp.copy()
+    counts: dict[str, tuple[int, int]] = {}
+    for raw_type, rules in type_thresholds.items():
+        bsp_type = str(raw_type).lower()
+        if not isinstance(rules, dict):
+            raise TypeError(f"Thresholds for BSP {bsp_type!r} must be a dictionary")
+        type_mask = result["bsp_type"] == bsp_type
+        before = int(type_mask.sum())
+        keep = pd.Series(True, index=result.index)
+        aliases = _BSP_PLOT_THRESHOLD_COLUMNS.get(bsp_type, {})
+        for raw_rule, raw_value in rules.items():
+            rule = str(raw_rule)
+            if rule.startswith("min_") or rule.startswith("max_"):
+                bound, feature = rule.split("_", 1)
+                column = aliases.get(feature, feature)
+                bounds = {bound: raw_value}
+            elif isinstance(raw_value, dict):
+                column = aliases.get(rule, rule)
+                bounds = raw_value
+            else:
+                raise ValueError(
+                    f"Rule {rule!r} must start with min_/max_, or its value must be a min/max dictionary"
+                )
+            if column not in result.columns:
+                raise KeyError(
+                    f"BSP {bsp_type} threshold {rule!r} maps to missing workbook column {column!r}"
+                )
+            numeric = pd.to_numeric(result[column], errors="coerce")
+            unknown_bounds = set(bounds).difference({"min", "max", "ranges"})
+            if unknown_bounds:
+                raise ValueError(f"Unsupported bounds for {rule!r}: {sorted(unknown_bounds)}")
+            if "ranges" in bounds:
+                ranges = bounds["ranges"]
+                if not isinstance(ranges, (list, tuple)) or not ranges:
+                    raise ValueError(f"{rule!r} ranges must be a non-empty list")
+                range_keep = pd.Series(False, index=result.index)
+                for index, accepted_range in enumerate(ranges, start=1):
+                    if not isinstance(accepted_range, dict):
+                        raise TypeError(f"{rule!r} range {index} must be a dictionary")
+                    invalid = set(accepted_range).difference({"min", "max"})
+                    if invalid:
+                        raise ValueError(
+                            f"Unsupported bounds for {rule!r} range {index}: {sorted(invalid)}"
+                        )
+                    accepted = numeric.notna()
+                    if "min" in accepted_range:
+                        accepted &= numeric >= float(accepted_range["min"])
+                    if "max" in accepted_range:
+                        accepted &= numeric <= float(accepted_range["max"])
+                    range_keep |= accepted
+                keep &= range_keep
+            if "min" in bounds:
+                keep &= numeric >= float(bounds["min"])
+            if "max" in bounds:
+                keep &= numeric <= float(bounds["max"])
+        result = result.loc[~type_mask | keep].copy()
+        counts[bsp_type] = (before, int((result["bsp_type"] == bsp_type).sum()))
+    return result, counts
+
+
+def plot_bsp_type_examples_from_excel(
+    config: RealisticSimulationConfig,
+    bsp_workbook_path: str | Path | None = None,
+    path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    direction: str | None = None,
+    example_types: tuple[str, ...] = ("1", "1p", "2", "2s", "3a", "3b"),
+    context_bars: int = 60,
+    selection: Literal["first", "largest"] = "largest",
+    show_chan_structure: bool = True,
+    show_discovery_time: bool = True,
+    show: bool = True,
+    all_points_by_type: bool = True,
+    max_background_points: int = 75_000,
+    include_delayed: bool = True,
+    type_thresholds: dict[str, dict] | None = None,
+) -> dict[str, Path | None] | Path | None:
+    """Plot confirmed BSP types.
+
+    By default, create one independent full-period plot per requested type and
+    include every matching BSP. Set ``all_points_by_type=False`` to retain the
+    legacy behavior: one selected example per type in a combined subplot grid.
+    """
+
+    import matplotlib.pyplot as plt
+
+    if int(context_bars) <= 0:
+        raise ValueError("context_bars must be greater than zero")
+    if selection not in {"first", "largest"}:
+        raise ValueError("selection must be 'first' or 'largest'")
+    if direction is not None and str(direction).lower() not in {"buy", "sell"}:
+        raise ValueError("direction must be 'buy', 'sell', or None")
+    if int(max_background_points) <= 0:
+        raise ValueError("max_background_points must be greater than zero")
+
+    workbook = bsp_workbook_path or config.bsp_workbook_path
+    bsp = pd.read_excel(workbook, sheet_name=config.bsp_sheet_name)
+    required = {"timestamp", "direction", "bsp_type", "klu_close"}
+    missing = required.difference(bsp.columns)
+    if missing:
+        raise KeyError(f"BSP workbook is missing columns: {sorted(missing)}")
+    bsp["timestamp"] = pd.to_datetime(bsp["timestamp"], errors="raise")
+    bsp["direction"] = bsp["direction"].astype(str).str.lower()
+    bsp["bsp_type"] = (
+        bsp["bsp_type"].astype(str).str.lower().str.replace(r"\.0$", "", regex=True)
+    )
+    bsp["klu_close"] = pd.to_numeric(bsp["klu_close"], errors="raise")
+    if start is not None:
+        bsp = bsp.loc[bsp["timestamp"] >= pd.Timestamp(start)]
+    if end is not None:
+        bsp = bsp.loc[bsp["timestamp"] <= pd.Timestamp(end)]
+    if direction is not None:
+        bsp = bsp.loc[bsp["direction"] == str(direction).lower()]
+
+    raw = _load_ohlcv_csv(config.data_path).reset_index(drop=True)
+    _, chan_feed = _prepare_price_frames(config.data_path, config.chan)
+    # snapshot_first_seen is one-based and refers to the chronological Chan
+    # feed position at which the historical BSP first became discoverable.
+    bsp["_discovery_timestamp"] = bsp["timestamp"]
+    if "snapshot_first_seen" in bsp.columns:
+        snapshot_positions = pd.to_numeric(
+            bsp["snapshot_first_seen"], errors="coerce"
+        ) - 1
+        valid = snapshot_positions.notna() & snapshot_positions.between(
+            0, len(chan_feed) - 1
+        )
+        if valid.any():
+            positions = snapshot_positions.loc[valid].astype(int).to_numpy()
+            bsp.loc[valid, "_discovery_timestamp"] = pd.to_datetime(
+                chan_feed.iloc[positions]["timestamp"].to_numpy()
+            )
+    bsp["_is_delayed"] = bsp["_discovery_timestamp"] > bsp["timestamp"]
+    if not include_delayed:
+        bsp = bsp.loc[~bsp["_is_delayed"]].copy()
+    bsp, threshold_counts = _apply_bsp_plot_type_thresholds(bsp, type_thresholds)
+    raw_index = pd.Series(raw.index.to_numpy(), index=raw["timestamp"])
+
+    if all_points_by_type:
+        period_start = pd.Timestamp(start) if start is not None else bsp["timestamp"].min()
+        period_end = pd.Timestamp(end) if end is not None else bsp["timestamp"].max()
+        price = raw.loc[
+            raw["timestamp"].between(period_start, period_end, inclusive="both"),
+            ["timestamp", "_close"],
+        ]
+        if price.empty:
+            raise ValueError("No price rows exist in the requested plot period")
+        stride = max(1, len(price) // int(max_background_points))
+        price_plot = price.iloc[::stride]
+        colors = {"buy": "#16803C", "sell": "#C33C3C"}
+        markers = {"buy": "^", "sell": "v"}
+        saved: dict[str, Path | None] = {}
+
+        def type_path(value: str) -> Path | None:
+            if path is None:
+                return None
+            requested = Path(path)
+            safe_type = str(value).replace("/", "_").replace("\\", "_")
+            if requested.suffix:
+                return requested.with_name(f"{requested.stem}_{safe_type}{requested.suffix}")
+            return requested / f"{config.chan.code.upper()}_bsp_type_{safe_type}.png"
+
+        for requested_type in example_types:
+            type_name = str(requested_type).lower()
+            points = bsp.loc[bsp["bsp_type"] == type_name].sort_values("timestamp")
+            fig, ax = plt.subplots(figsize=(22, 8))
+            ax.plot(
+                price_plot["timestamp"], price_plot["_close"],
+                color="#62748A", linewidth=0.75,
+                label=f"{config.chan.code.upper()} close", zorder=1,
+            )
+            for point_direction in ("buy", "sell"):
+                group = points.loc[points["direction"] == point_direction]
+                if group.empty:
+                    continue
+                ax.scatter(
+                    group["timestamp"], group["klu_close"],
+                    color=colors[point_direction], marker=markers[point_direction],
+                    s=34, alpha=0.82, linewidths=0.3,
+                    label=f"{point_direction.title()} ({len(group):,})", zorder=3,
+                )
+            ax.set_title(
+                f"{config.chan.code.upper()} — all confirmed BSP type {requested_type} "
+                f"({len(points):,} points; {'including delayed' if include_delayed else 'immediate only'})\n"
+                f"{period_start} to {period_end}"
+            )
+            if type_name in threshold_counts:
+                before, after = threshold_counts[type_name]
+                ax.set_title(ax.get_title() + f" | threshold filter: {before:,} → {after:,}")
+            ax.set_xlabel("Timestamp")
+            ax.set_ylabel("Price")
+            ax.grid(alpha=0.2)
+            ax.legend(loc="best")
+            fig.autofmt_xdate()
+            fig.tight_layout()
+            target = type_path(type_name)
+            saved_path: Path | None = None
+            if target is not None:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                fig.savefig(target, dpi=180, bbox_inches="tight")
+                saved_path = target.resolve()
+            saved[type_name] = saved_path
+            if show:
+                plt.show()
+            else:
+                plt.close(fig)
+        if not saved:
+            raise ValueError("No requested BSP types exist in the selected period")
+        return saved
+
+    examples: list[tuple[str, pd.Series]] = []
+    for bsp_type in example_types:
+        group = bsp.loc[bsp["bsp_type"] == str(bsp_type).lower()].copy()
+        if group.empty:
+            continue
+        if selection == "largest":
+            amp_column = next(
+                (
+                    name
+                    for name in (
+                        "feat_bsp_bi_amp",
+                        f"feat_bsp{bsp_type}_bi_amp",
+                        "feat_bi_amp",
+                    )
+                    if name in group.columns and group[name].notna().any()
+                ),
+                None,
+            )
+            event = (
+                group.loc[pd.to_numeric(group[amp_column], errors="coerce").idxmax()]
+                if amp_column is not None
+                else group.sort_values("timestamp").iloc[0]
+            )
+        else:
+            event = group.sort_values("timestamp").iloc[0]
+        examples.append((str(bsp_type), event))
+    if not examples:
+        raise ValueError("No requested BSP types exist in the selected period")
+
+    columns = 2
+    rows_count = (len(examples) + columns - 1) // columns
+    fig, axes = plt.subplots(
+        rows_count,
+        columns,
+        figsize=(20, max(4.5 * rows_count, 5)),
+        squeeze=False,
+    )
+    colors = {"buy": "#16803C", "sell": "#C33C3C"}
+    markers = {"buy": "^", "sell": "v"}
+    for ax, (bsp_type, event) in zip(axes.flat, examples):
+        timestamp = pd.Timestamp(event["timestamp"])
+        trigger_timestamp = timestamp
+        snapshot = event.get("snapshot_first_seen")
+        if snapshot is not None and not pd.isna(snapshot):
+            snapshot_pos = int(snapshot) - 1
+            if 0 <= snapshot_pos < len(chan_feed):
+                trigger_timestamp = pd.Timestamp(
+                    chan_feed.iloc[snapshot_pos]["timestamp"]
+                )
+        if timestamp not in raw_index.index:
+            ax.set_visible(False)
+            continue
+        center_value = raw_index.loc[timestamp]
+        center = int(
+            center_value.iloc[-1]
+            if isinstance(center_value, pd.Series)
+            else center_value
+        )
+        trigger_positions = raw.index[raw["timestamp"] <= trigger_timestamp]
+        trigger_center = int(trigger_positions[-1]) if len(trigger_positions) else center
+        left = max(0, min(center, trigger_center) - int(context_bars))
+        right = min(len(raw), max(center, trigger_center) + int(context_bars) + 1)
+        window = raw.iloc[left:right]
+        event_direction = str(event["direction"]).lower()
+        ax.plot(
+            window["timestamp"],
+            window["_close"],
+            color="#62748A",
+            linewidth=0.9,
+        )
+        ax.scatter(
+            [timestamp],
+            [float(event["klu_close"])],
+            color=colors[event_direction],
+            marker=markers[event_direction],
+            s=100,
+            zorder=4,
+            label=f"{event_direction.title()} BSP {bsp_type}",
+        )
+        ax.axvline(timestamp, color=colors[event_direction], alpha=0.3, linewidth=0.8)
+        if show_discovery_time and trigger_timestamp > timestamp:
+            ax.axvline(
+                trigger_timestamp,
+                color="#A25AC4",
+                linestyle="--",
+                alpha=0.75,
+                linewidth=1.0,
+                label=f"discovered {trigger_timestamp}",
+            )
+        if show_chan_structure:
+            geometry = _chan_geometry_at_timestamp(raw, config.chan, trigger_timestamp)
+            bi_label_used = seg_label_used = zs_label_used = False
+            for x1, y1, x2, y2, sure in geometry["bis"]:
+                if x2 < window["timestamp"].min() or x1 > window["timestamp"].max():
+                    continue
+                ax.plot(
+                    [x1, x2], [y1, y2], color="#E28A2B", linewidth=1.25,
+                    linestyle="-" if sure else "--", alpha=0.9,
+                    label="Bi" if not bi_label_used else None, zorder=2,
+                )
+                bi_label_used = True
+            for x1, y1, x2, y2, sure in geometry["segments"]:
+                if x2 < window["timestamp"].min() or x1 > window["timestamp"].max():
+                    continue
+                ax.plot(
+                    [x1, x2], [y1, y2], color="#7651B5", linewidth=2.2,
+                    linestyle="-" if sure else "--", alpha=0.9,
+                    label="Segment" if not seg_label_used else None, zorder=2.5,
+                )
+                seg_label_used = True
+            for x1, x2, low, high, sure in geometry["zones"]:
+                if x2 < window["timestamp"].min() or x1 > window["timestamp"].max():
+                    continue
+                ax.fill_between(
+                    [x1, x2], [low, low], [high, high], color="#4F9D8A",
+                    alpha=0.16 if sure else 0.08,
+                    label="Zhongshu" if not zs_label_used else None, zorder=1.5,
+                )
+                zs_label_used = True
+        detail_parts = []
+        for column, label in (
+            ("segment_direction", "segment"),
+            ("feat_divergence_rate", "divergence"),
+            ("feat_bsp2_retrace_rate", "retrace"),
+            ("feat_bsp2s_retrace_rate", "retrace"),
+            ("feat_bsp3_zs_height", "ZS height"),
+        ):
+            value = event.get(column)
+            if value is not None and not pd.isna(value):
+                detail_parts.append(
+                    f"{label}={value:.4f}" if isinstance(value, (int, float)) else f"{label}={value}"
+                )
+        ax.set_title(
+            f"BSP {bsp_type} example — {event_direction.title()} — {timestamp}\n"
+            + ", ".join(detail_parts)
+        )
+        ax.set_ylabel("Price")
+        ax.grid(alpha=0.2)
+        ax.legend(loc="best")
+    for ax in axes.flat[len(examples):]:
+        ax.set_visible(False)
+    fig.suptitle(
+        f"{config.chan.code.upper()} confirmed BSP type examples "
+        f"({selection} amplitude selection)",
+        fontsize=14,
+    )
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    saved_path: Path | None = None
+    if path is not None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(target, dpi=180, bbox_inches="tight")
+        saved_path = target.resolve()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return saved_path
+
+
+def interactive_bsp_type_explorer_from_excel(
+    config: RealisticSimulationConfig,
+    bsp_workbook_path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    example_types: tuple[str, ...] = ("1", "1p", "2", "2s", "3a", "3b"),
+    max_background_points: int = 75_000,
+):
+    """Display a Jupyter BSP threshold explorer with buttons and live Plotly output.
+
+    Data is loaded once. Select a BSP type, direction and delayed-point policy,
+    edit that type's Chan thresholds, then click ``Update Plot``. Thresholds
+    use the same aliases and filtering implementation as the static plot.
+    """
+    try:
+        import ipywidgets as widgets
+        import plotly.graph_objects as go
+        from IPython.display import HTML, clear_output, display
+    except ImportError as exc:
+        raise ImportError(
+            "Interactive BSP controls require ipywidgets. In Jupyter run "
+            "`%pip install ipywidgets`, restart the kernel, then call this function again."
+        ) from exc
+    if int(max_background_points) <= 0:
+        raise ValueError("max_background_points must be greater than zero")
+
+    workbook = bsp_workbook_path or config.bsp_workbook_path
+    bsp = pd.read_excel(workbook, sheet_name=config.bsp_sheet_name)
+    required = {"timestamp", "direction", "bsp_type", "klu_close"}
+    missing = required.difference(bsp.columns)
+    if missing:
+        raise KeyError(f"BSP workbook is missing columns: {sorted(missing)}")
+    bsp["timestamp"] = pd.to_datetime(bsp["timestamp"], errors="raise")
+    bsp["direction"] = bsp["direction"].astype(str).str.lower()
+    bsp["bsp_type"] = bsp["bsp_type"].astype(str).str.lower().str.replace(r"\.0$", "", regex=True)
+    bsp["klu_close"] = pd.to_numeric(bsp["klu_close"], errors="raise")
+    period_start = pd.Timestamp(start) if start is not None else bsp["timestamp"].min()
+    period_end = pd.Timestamp(end) if end is not None else bsp["timestamp"].max()
+    bsp = bsp.loc[bsp["timestamp"].between(period_start, period_end, inclusive="both")].copy()
+
+    raw = _load_ohlcv_csv(config.data_path).reset_index(drop=True)
+    price = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both"),
+        ["timestamp", "_close"],
+    ]
+    if price.empty:
+        raise ValueError("No price rows exist in the requested period")
+    stride = max(1, len(price) // int(max_background_points))
+    price_plot = price.iloc[::stride]
+    _, chan_feed = _prepare_price_frames(config.data_path, config.chan)
+    bsp["_discovery_timestamp"] = bsp["timestamp"]
+    if "snapshot_first_seen" in bsp.columns:
+        positions = pd.to_numeric(bsp["snapshot_first_seen"], errors="coerce") - 1
+        valid = positions.notna() & positions.between(0, len(chan_feed) - 1)
+        if valid.any():
+            bsp.loc[valid, "_discovery_timestamp"] = pd.to_datetime(
+                chan_feed.iloc[positions.loc[valid].astype(int).to_numpy()]["timestamp"].to_numpy()
+            )
+    bsp["_is_delayed"] = bsp["_discovery_timestamp"] > bsp["timestamp"]
+
+    type_buttons = widgets.ToggleButtons(
+        options=[(f"Type {value}", str(value).lower()) for value in example_types],
+        description="BSP type:", button_style="info",
+    )
+    direction_widget = widgets.Dropdown(
+        options=[("All", "all"), ("Buy", "buy"), ("Sell", "sell")],
+        value="all", description="Direction:",
+    )
+    delayed_widget = widgets.Checkbox(value=True, description="Include delayed")
+    slider_range_widget = widgets.ToggleButtons(
+        options=[
+            ("Middle 90%", "90"), ("Middle 95%", "95"),
+            ("Middle 98%", "98"), ("Middle 99%", "99"), ("Full", "full"),
+        ],
+        value="90", description="Slider range:", button_style="",
+        style={"description_width": "100px"},
+    )
+    update_button = widgets.Button(description="Update Plot", button_style="success", icon="refresh")
+    reset_button = widgets.Button(description="Reset Thresholds", icon="undo")
+    status = widgets.HTML()
+    controls_box = widgets.VBox()
+    plot_output = widgets.Output()
+
+    # The most meaningful Chan thresholds for each point family. A blank/NaN
+    # field means that bound is disabled.
+    indicator_thresholds = (("macd_value", "MACD"), ("rsi", "RSI"))
+    profiles = {
+        "1": (("divergence_rate", "Divergence"), ("bi_amp_rate", "Bi amp rate"),
+              ("bi_klu_cnt", "Bi bars"), ("zs_cnt", "ZS count"),
+              *indicator_thresholds),
+        "1p": (("divergence_rate", "Divergence"), ("bi_amp_rate", "Bi amp rate"),
+               ("bi_klu_cnt", "Bi bars"), *indicator_thresholds),
+        "2": (("retrace_rate", "Retrace"), ("break_bi_amp_rate", "Break amp rate"),
+              ("bi_amp_rate", "Bi amp rate"), ("bi_klu_cnt", "Bi bars"),
+              *indicator_thresholds),
+        "2s": (("retrace_rate", "Retrace"), ("break_bi_amp_rate", "Break amp rate"),
+               ("bi_amp_rate", "Bi amp rate"), ("bi_klu_cnt", "Bi bars"),
+               ("level", "2s level"), *indicator_thresholds),
+        "3a": (("zs_height", "ZS height"), ("bi_amp_rate", "Bi amp rate"),
+               ("bi_klu_cnt", "Bi bars"), *indicator_thresholds),
+        "3b": (("zs_height", "ZS height"), ("bi_amp_rate", "Bi amp rate"),
+               ("bi_klu_cnt", "Bi bars"), *indicator_thresholds),
+    }
+    threshold_widgets: dict[str, object] = {}
+    threshold_full_ranges: dict[str, tuple[float, float]] = {}
+    secondary_threshold_widgets: dict[str, object] = {}
+    secondary_enabled_widgets: dict[str, object] = {}
+
+    def rebuild_threshold_controls(*_):
+        threshold_widgets.clear()
+        threshold_full_ranges.clear()
+        secondary_threshold_widgets.clear()
+        secondary_enabled_widgets.clear()
+        rows = []
+        selected_type = type_buttons.value
+        aliases = _BSP_PLOT_THRESHOLD_COLUMNS.get(selected_type, {})
+        type_rows = bsp.loc[bsp["bsp_type"] == selected_type]
+        for alias, label in profiles.get(type_buttons.value, ()):
+            column = aliases.get(alias, alias)
+            if column not in type_rows.columns:
+                rows.append(widgets.HTML(f"<i>{label}: workbook column {column} is unavailable</i>"))
+                continue
+            numeric = pd.to_numeric(type_rows[column], errors="coerce").dropna()
+            if numeric.empty:
+                rows.append(widgets.HTML(f"<i>{label}: no numeric values available</i>"))
+                continue
+            range_mode = slider_range_widget.value
+            if range_mode == "full":
+                lower, upper = float(numeric.min()), float(numeric.max())
+            else:
+                central_fraction = float(range_mode) / 100.0
+                tail = (1.0 - central_fraction) / 2.0
+                lower, upper = map(float, numeric.quantile([tail, 1.0 - tail]).to_numpy())
+            if np.isclose(lower, upper):
+                padding = max(abs(lower) * 0.01, 1.0)
+                slider_min, slider_max = lower - padding, upper + padding
+            else:
+                slider_min, slider_max = lower, upper
+            step = max((slider_max - slider_min) / 250.0, 1e-8)
+            slider = widgets.FloatRangeSlider(
+                value=(lower, upper), min=slider_min, max=slider_max, step=step,
+                description=f"{label}:", continuous_update=False,
+                readout=True, readout_format=".4g",
+                layout=widgets.Layout(width="720px"),
+                style={"description_width": "140px"},
+            )
+            threshold_widgets[alias] = slider
+            threshold_full_ranges[alias] = (lower, upper)
+            slider.observe(update_plot, names="value")
+            rows.append(slider)
+            if alias in {"macd_value", "rsi"}:
+                second_slider = widgets.FloatRangeSlider(
+                    value=(lower, upper), min=slider_min, max=slider_max, step=step,
+                    description=f"{label} range 2:", continuous_update=False,
+                    readout=True, readout_format=".4g", disabled=True,
+                    layout=widgets.Layout(width="720px"),
+                    style={"description_width": "140px"},
+                )
+                second_enabled = widgets.Checkbox(
+                    value=False, description=f"Use second {label} range",
+                    indent=False,
+                )
+
+                def toggle_second(change, *, target=second_slider):
+                    target.disabled = not bool(change["new"])
+                    update_plot()
+
+                second_enabled.observe(toggle_second, names="value")
+                second_slider.observe(update_plot, names="value")
+                secondary_threshold_widgets[alias] = second_slider
+                secondary_enabled_widgets[alias] = second_enabled
+                rows.extend((second_enabled, second_slider))
+        controls_box.children = tuple(rows)
+
+    def current_rules() -> dict:
+        rules = {}
+        for alias, slider in threshold_widgets.items():
+            minimum, maximum = map(float, slider.value)
+            full_minimum, full_maximum = threshold_full_ranges[alias]
+            bounds = {}
+            tolerance = max(abs(full_maximum - full_minimum) * 1e-9, 1e-12)
+            if minimum > full_minimum + tolerance:
+                bounds["min"] = minimum
+            if maximum < full_maximum - tolerance:
+                bounds["max"] = maximum
+            second_enabled = secondary_enabled_widgets.get(alias)
+            if second_enabled is not None and second_enabled.value:
+                second_slider = secondary_threshold_widgets[alias]
+                second_minimum, second_maximum = map(float, second_slider.value)
+                second_bounds = {}
+                if second_minimum > full_minimum + tolerance:
+                    second_bounds["min"] = second_minimum
+                if second_maximum < full_maximum - tolerance:
+                    second_bounds["max"] = second_maximum
+                rules[alias] = {"ranges": [bounds, second_bounds]}
+            elif bounds:
+                rules[alias] = bounds
+        return rules
+
+    def update_plot(_=None):
+        selected_type = type_buttons.value
+        subset = bsp.loc[bsp["bsp_type"] == selected_type].copy()
+        original_count = len(subset)
+        if not delayed_widget.value:
+            subset = subset.loc[~subset["_is_delayed"]]
+        if direction_widget.value != "all":
+            subset = subset.loc[subset["direction"] == direction_widget.value]
+        pre_threshold_count = len(subset)
+        rules = current_rules()
+        if rules:
+            subset, _ = _apply_bsp_plot_type_thresholds(
+                subset, {selected_type: rules}
+            )
+        figure = go.Figure()
+        figure.add_trace(go.Scattergl(
+            x=price_plot["timestamp"], y=price_plot["_close"], mode="lines",
+            name=f"{config.chan.code.upper()} close",
+            line={"color": "#62748A", "width": 1},
+        ))
+        for point_direction, color, symbol in (
+            ("buy", "#16803C", "triangle-up"), ("sell", "#C33C3C", "triangle-down")
+        ):
+            group = subset.loc[subset["direction"] == point_direction]
+            if len(group):
+                macd_hover = pd.to_numeric(
+                    group.get("macd_value", pd.Series(np.nan, index=group.index)),
+                    errors="coerce",
+                )
+                rsi_hover = pd.to_numeric(
+                    group.get("rsi", pd.Series(np.nan, index=group.index)),
+                    errors="coerce",
+                )
+                figure.add_trace(go.Scattergl(
+                    x=group["timestamp"], y=group["klu_close"], mode="markers",
+                    name=f"{point_direction.title()} ({len(group):,})",
+                    marker={"color": color, "symbol": symbol, "size": 9},
+                    customdata=np.column_stack((
+                        group["bsp_type"], group["_discovery_timestamp"],
+                        macd_hover, rsi_hover,
+                    )),
+                    hovertemplate=(
+                        "Time=%{x}<br>Price=%{y:.4f}<br>Type=%{customdata[0]}"
+                        "<br>Discovered=%{customdata[1]}<br>MACD=%{customdata[2]:.5g}"
+                        "<br>RSI=%{customdata[3]:.3f}<extra></extra>"
+                    ),
+                ))
+        figure.update_layout(
+            title=f"{config.chan.code.upper()} BSP {selected_type}: {len(subset):,} points",
+            xaxis_title="Timestamp", yaxis_title="Price", template="plotly_white",
+            height=650, hovermode="closest", legend={"orientation": "h"},
+        )
+        status.value = (
+            f"<b>Type {selected_type}</b>: workbook period count {original_count:,} → "
+            f"direction/delay count {pre_threshold_count:,} → threshold count <b>{len(subset):,}</b>"
+        )
+        with plot_output:
+            clear_output(wait=True)
+            # Plotly's normal notebook MIME renderer requires nbformat. Some
+            # lightweight Jupyter kernels have IPython/widgets but omit it.
+            # Fall back to self-contained HTML so the explorer still works.
+            try:
+                import nbformat
+                nbformat_ok = tuple(int(part) for part in nbformat.__version__.split(".")[:2]) >= (4, 2)
+            except (ImportError, AttributeError, ValueError):
+                nbformat_ok = False
+            if nbformat_ok:
+                display(figure)
+            else:
+                display(HTML(figure.to_html(
+                    full_html=False,
+                    include_plotlyjs=True,
+                    config={"responsive": True, "displaylogo": False},
+                )))
+
+    def reset_thresholds(_=None):
+        for alias, slider in threshold_widgets.items():
+            slider.value = threshold_full_ranges[alias]
+        for alias, slider in secondary_threshold_widgets.items():
+            slider.value = threshold_full_ranges[alias]
+            slider.disabled = True
+            secondary_enabled_widgets[alias].value = False
+        update_plot()
+
+    type_buttons.observe(rebuild_threshold_controls, names="value")
+    type_buttons.observe(update_plot, names="value")
+    slider_range_widget.observe(rebuild_threshold_controls, names="value")
+    slider_range_widget.observe(update_plot, names="value")
+    direction_widget.observe(update_plot, names="value")
+    delayed_widget.observe(update_plot, names="value")
+    update_button.on_click(update_plot)
+    reset_button.on_click(reset_thresholds)
+    rebuild_threshold_controls()
+    dashboard = widgets.VBox([
+        widgets.HTML("<h3>Interactive Chan BSP Threshold Explorer</h3>"),
+        type_buttons,
+        widgets.HBox([direction_widget, delayed_widget]),
+        slider_range_widget,
+        widgets.HTML(
+            "<small>Slider endpoints are open bounds: leaving a handle at an endpoint "
+            "does not remove values outside the displayed percentile range.</small>"
+        ),
+        controls_box,
+        widgets.HBox([update_button, reset_button]),
+        status,
+        plot_output,
+    ])
+    display(dashboard)
+    update_plot()
+    return dashboard
+
+
+def plot_mature_bspoints_from_excel(
+    config: RealisticSimulationConfig,
+    bsp_workbook_path: str | Path | None = None,
+    path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    bsp_types: tuple[str, ...] = ("1", "1p", "2", "2s", "3a", "3b"),
+    direction: str | None = None,
+    minimum_mature_rate: float = 1.0,
+    max_background_points: int = 75_000,
+    annotate_types: bool = False,
+    show: bool = True,
+) -> Path | None:
+    """Plot only BSPs carrying an explicit mature flag or mature-rate value.
+
+    Snapshot persistence is deliberately not interpreted as maturity. The BSP
+    workbook must contain ``is_mature``, ``is_mature_point``, or
+    ``mature_rate`` as produced by a maturity-aware export.
+    """
+    import matplotlib.pyplot as plt
+
+    if direction is not None and str(direction).lower() not in {"buy", "sell"}:
+        raise ValueError("direction must be 'buy', 'sell', or None")
+    if not 0.0 <= float(minimum_mature_rate) <= 1.0:
+        raise ValueError("minimum_mature_rate must be between 0 and 1")
+    if int(max_background_points) <= 0:
+        raise ValueError("max_background_points must be greater than zero")
+
+    workbook = Path(bsp_workbook_path or config.bsp_workbook_path)
+    bsp = pd.read_excel(workbook, sheet_name=config.bsp_sheet_name)
+    required = {"timestamp", "direction", "bsp_type", "klu_close"}
+    missing = required.difference(bsp.columns)
+    if missing:
+        raise KeyError(f"BSP workbook is missing columns: {sorted(missing)}")
+
+    maturity_columns = [
+        column for column in ("is_mature", "is_mature_point", "mature_rate")
+        if column in bsp.columns
+    ]
+    if not maturity_columns:
+        raise ValueError(
+            f"{workbook} has no explicit maturity column. Regenerate it with "
+            "is_mature/is_mature_point or mature_rate; snapshot persistence is "
+            "not a valid maturity label."
+        )
+
+    bsp["timestamp"] = pd.to_datetime(bsp["timestamp"], errors="raise")
+    bsp["direction"] = bsp["direction"].astype(str).str.lower()
+    bsp["bsp_type"] = (
+        bsp["bsp_type"].astype(str).str.lower().str.replace(r"\.0$", "", regex=True)
+    )
+    bsp["klu_close"] = pd.to_numeric(bsp["klu_close"], errors="coerce")
+    mature = pd.Series(False, index=bsp.index)
+    for column in ("is_mature", "is_mature_point"):
+        if column in bsp.columns:
+            values = bsp[column]
+            mature |= values.fillna(False).astype(str).str.strip().str.lower().isin(
+                {"1", "1.0", "true", "yes", "y"}
+            )
+    if "mature_rate" in bsp.columns:
+        mature |= pd.to_numeric(bsp["mature_rate"], errors="coerce").ge(
+            float(minimum_mature_rate)
+        )
+
+    period_start = pd.Timestamp(start) if start is not None else bsp["timestamp"].min()
+    period_end = pd.Timestamp(end) if end is not None else bsp["timestamp"].max()
+    allowed_types = {str(value).lower() for value in bsp_types}
+    point_mask = (
+        mature
+        & bsp["timestamp"].between(period_start, period_end, inclusive="both")
+        & bsp["bsp_type"].isin(allowed_types)
+    )
+    if direction is not None:
+        point_mask &= bsp["direction"].eq(str(direction).lower())
+    points = bsp.loc[point_mask].sort_values("timestamp")
+
+    raw = _load_ohlcv_csv(config.data_path)
+    price = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both"),
+        ["timestamp", "_close"],
+    ]
+    if price.empty:
+        raise ValueError("No price rows exist in the requested plot period")
+    stride = max(1, len(price) // int(max_background_points))
+
+    fig, ax = plt.subplots(figsize=(22, 9))
+    ax.plot(
+        price.iloc[::stride]["timestamp"], price.iloc[::stride]["_close"],
+        color="#62748A", linewidth=0.8,
+        label=f"{config.chan.code.upper()} close", zorder=1,
+    )
+    for point_direction, color, marker in (
+        ("buy", "#16803C", "^"), ("sell", "#C33C3C", "v")
+    ):
+        group = points.loc[points["direction"] == point_direction]
+        if group.empty:
+            continue
+        ax.scatter(
+            group["timestamp"], group["klu_close"], color=color, marker=marker,
+            s=46, alpha=0.86, linewidths=0.35,
+            label=f"Mature {point_direction.title()} ({len(group):,})", zorder=3,
+        )
+        if annotate_types:
+            for row in group.itertuples(index=False):
+                ax.annotate(
+                    str(row.bsp_type), (row.timestamp, row.klu_close),
+                    xytext=(0, 7 if point_direction == "buy" else -11),
+                    textcoords="offset points", ha="center", fontsize=8, color=color,
+                )
+
+    ax.set_title(
+        f"{config.chan.code.upper()} — Mature Chan BSPs ({len(points):,})\n"
+        f"{period_start} to {period_end}"
+    )
+    ax.set_xlabel("Timestamp")
+    ax.set_ylabel("Price")
+    ax.grid(alpha=0.2)
+    ax.legend(loc="best")
+    fig.autofmt_xdate()
+    fig.tight_layout()
+
+    saved_path: Path | None = None
+    if path is not None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(target, dpi=180, bbox_inches="tight")
+        saved_path = target.resolve()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    print(
+        f"[Mature BSP] columns={maturity_columns}; points={len(points):,}; "
+        f"saved={saved_path}"
+    )
+    return saved_path
+
+
+def plot_mature_bsp_quality_from_excel(
+    config: RealisticSimulationConfig,
+    maturity_workbook_path: str | Path,
+    path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    bsp_types: tuple[str, ...] = ("1", "1p", "2", "2s", "3a", "3b"),
+    direction: str | None = None,
+    include_censored: bool = False,
+    plot_at: Literal["bsp", "maturity"] = "maturity",
+    max_background_points: int = 75_000,
+    annotate_types: bool = False,
+    show: bool = True,
+) -> Path | None:
+    """Plot mature BSPs colored by held, covered, invalidated, or censored."""
+    import matplotlib.pyplot as plt
+
+    if direction is not None and str(direction).lower() not in {"buy", "sell"}:
+        raise ValueError("direction must be 'buy', 'sell', or None")
+    if plot_at not in {"bsp", "maturity"}:
+        raise ValueError("plot_at must be 'bsp' or 'maturity'")
+    quality = pd.read_excel(maturity_workbook_path, sheet_name="Mature BSP Quality")
+    required = {
+        "bsp_timestamp", "maturity_timestamp", "direction", "bsp_type",
+        "klu_close", "quality_status",
+    }
+    missing = required.difference(quality.columns)
+    if missing:
+        raise KeyError(f"Mature BSP Quality sheet is missing columns: {sorted(missing)}")
+    quality["bsp_timestamp"] = pd.to_datetime(quality["bsp_timestamp"], errors="raise")
+    quality["maturity_timestamp"] = pd.to_datetime(quality["maturity_timestamp"], errors="raise")
+    quality["direction"] = quality["direction"].astype(str).str.lower()
+    quality["bsp_type"] = quality["bsp_type"].astype(str).str.lower().str.replace(r"\.0$", "", regex=True)
+    quality["klu_close"] = pd.to_numeric(quality["klu_close"], errors="coerce")
+    event_column = "bsp_timestamp" if plot_at == "bsp" else "maturity_timestamp"
+    price_column = "klu_close"
+    if plot_at == "maturity" and "maturity_market_price" in quality.columns:
+        quality["maturity_market_price"] = pd.to_numeric(
+            quality["maturity_market_price"], errors="coerce"
+        )
+        price_column = "maturity_market_price"
+    period_start = pd.Timestamp(start) if start is not None else quality[event_column].min()
+    period_end = pd.Timestamp(end) if end is not None else quality[event_column].max()
+    mask = (
+        quality[event_column].between(period_start, period_end, inclusive="both")
+        & quality["bsp_type"].isin({str(value).lower() for value in bsp_types})
+    )
+    if direction is not None:
+        mask &= quality["direction"].eq(str(direction).lower())
+    if not include_censored:
+        mask &= ~quality["quality_status"].eq("censored")
+    points = quality.loc[mask].copy()
+
+    raw = _load_ohlcv_csv(config.data_path)
+    price = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both"),
+        ["timestamp", "_close"],
+    ]
+    if price.empty:
+        raise ValueError("No price rows exist in the requested plot period")
+    stride = max(1, len(price) // int(max_background_points))
+    fig, ax = plt.subplots(figsize=(22, 9))
+    ax.plot(
+        price.iloc[::stride]["timestamp"], price.iloc[::stride]["_close"],
+        color="#62748A", linewidth=0.8, label=f"{config.chan.code.upper()} close", zorder=1,
+    )
+    styles = {
+        "held": ("#16803C", "o", "Held"),
+        "covered": ("#C33C3C", "X", "Covered"),
+        "structurally_invalidated": ("#D97706", "s", "Structurally invalidated"),
+        "censored": ("#7C3AED", "D", "Censored"),
+    }
+    for status_name, (color, marker, label) in styles.items():
+        group = points.loc[points["quality_status"] == status_name]
+        if group.empty:
+            continue
+        ax.scatter(
+            group[event_column], group[price_column], color=color, marker=marker,
+            s=48, alpha=0.86, linewidths=0.35,
+            label=f"{label} ({len(group):,})", zorder=3,
+        )
+        if annotate_types:
+            for row in group.itertuples(index=False):
+                ax.annotate(
+                    str(row.bsp_type), (getattr(row, event_column), getattr(row, price_column)),
+                    xytext=(0, 7), textcoords="offset points", ha="center",
+                    fontsize=8, color=color,
+                )
+    held = int(points["quality_status"].eq("held").sum())
+    resolved = int(points["quality_status"].isin({"held", "covered", "structurally_invalidated"}).sum())
+    ax.set_title(
+        f"{config.chan.code.upper()} — Mature BSP post-confirmation quality\n"
+        f"{period_start} to {period_end} | held={held:,}/{resolved:,} resolved"
+    )
+    ax.set_xlabel("BSP timestamp" if plot_at == "bsp" else "Maturity timestamp")
+    ax.set_ylabel("Price")
+    ax.grid(alpha=0.2)
+    ax.legend(loc="best")
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    saved_path: Path | None = None
+    if path is not None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(target, dpi=180, bbox_inches="tight")
+        saved_path = target.resolve()
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return saved_path
+
+
+def load_virtual_bsp_backtest_data(
+    config: RealisticSimulationConfig,
+    virtual_bsp_path: str | Path,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read price CSV and saved virtual BSP workbook for direct replay."""
+
+    candidates = pd.read_excel(
+        virtual_bsp_path, sheet_name="Virtual BSP Candidates"
+    )
+    required = {"bsp_timestamp", "direction", "klu_close"}
+    missing = required.difference(candidates.columns)
+    if missing:
+        raise KeyError(
+            f"Virtual BSP workbook is missing columns: {sorted(missing)}"
+        )
+    timestamp_source = (
+        "trigger_timestamp"
+        if "trigger_timestamp" in candidates.columns
+        else "bsp_timestamp"
+    )
+    candidates["timestamp"] = pd.to_datetime(
+        candidates[timestamp_source], errors="raise"
+    )
+    candidates["bsp_timestamp"] = pd.to_datetime(
+        candidates["bsp_timestamp"], errors="raise"
+    )
+    candidates["direction"] = candidates["direction"].astype(str).str.lower()
+    candidates["bsp_type"] = "virtual_bi"
+    if "segment_direction" not in candidates.columns and "seg_direction" in candidates.columns:
+        candidates["segment_direction"] = candidates["seg_direction"]
+    if "segment_confirmed" not in candidates.columns and "seg_is_sure" in candidates.columns:
+        candidates["segment_confirmed"] = candidates["seg_is_sure"]
+
+    raw = _load_ohlcv_csv(config.data_path)
+    period_start = pd.Timestamp(start) if start is not None else candidates["timestamp"].min()
+    period_end = pd.Timestamp(end) if end is not None else candidates["timestamp"].max()
+    if pd.isna(period_start) or pd.isna(period_end):
+        raise ValueError("The virtual BSP workbook contains no candidates")
+    if period_end < period_start:
+        raise ValueError("end must be greater than or equal to start")
+    raw = raw.loc[
+        raw["timestamp"].between(period_start, period_end, inclusive="both")
+    ].copy()
+    if raw.empty:
+        raise ValueError("No price rows exist in the requested backtest period")
+    price = raw.assign(
+        open=raw["_open"],
+        high=raw["_high"],
+        low=raw["_low"],
+        close=raw["_close"],
+        volume=raw["_vol"],
+    )[["timestamp", "open", "high", "low", "close", "volume"]]
+    candidates = candidates.loc[
+        candidates["timestamp"].between(period_start, period_end, inclusive="both")
+    ].copy()
+    candidates = candidates.loc[candidates["timestamp"].isin(price["timestamp"])]
+    candidates = candidates.sort_values("timestamp").drop_duplicates(
+        ["timestamp", "direction", "bsp_type"], keep="first"
+    )
+    return price.reset_index(drop=True), candidates.reset_index(drop=True)
+
+
+def default_virtual_bsp_strategy_config() -> SegBspStrategyConfig:
+    """Return a simple long-only configuration for virtual-Bi candidates."""
+
+    return SegBspStrategyConfig(
+        entry_segment_directions=frozenset({"up", "down"}),
+        entry_bsp_types=frozenset({"virtual_bi"}),
+        sell_bsp_types=frozenset({"virtual_bi"}),
+        required_buy_signals=1,
+        buy_lookback_bars=5,
+        required_sell_signals=1,
+        sell_lookback_bars=5,
+        exit_on_down_segment=False,
+        allow_unconfirmed_entry=True,
+        position_fraction=1.0,
+    )
+
+
+def run_virtual_bsp_simulation_from_excel(
+    config: RealisticSimulationConfig,
+    virtual_bsp_path: str | Path | None = None,
+    *,
+    start: str | pd.Timestamp | None = None,
+    end: str | pd.Timestamp | None = None,
+    strategy_config: SegBspStrategyConfig | None = None,
+) -> RealisticSimulationOutput:
+    """Backtest saved virtual candidates with next-bar-open execution."""
+
+    workbook_path = virtual_bsp_path or config.bsp_workbook_path
+    effective_start = config.chan.start if start is None else start
+    effective_end = config.chan.end if end is None else end
+    price, candidates = load_virtual_bsp_backtest_data(
+        config, workbook_path, start=effective_start, end=effective_end
+    )
+    result = run_bsp_backtest(
+        price,
+        candidates,
+        SegBspStrategy(strategy_config or config.strategy),
+        config.backtest,
+        RiskManager(config.risk),
+    )
+    return RealisticSimulationOutput(
+        result=result,
+        price_df=price,
+        bsp_df=candidates,
+        chan_feed_df=pd.DataFrame(),
+        config=config,
+    )
+
+
 def plot_immediate_vs_virtual_bspoints_from_files(
     config: RealisticSimulationConfig | None = None,
     path: str | Path | None = None,
@@ -2044,6 +3511,15 @@ __all__ = [
     "generate_trigger_timed_bsp",
     "generate_virtual_bsp_candidates",
     "save_virtual_bsp_candidates_to_excel",
+    "plot_virtual_bsp_candidates_from_excel",
+    "plot_virtual_bspoints_from_excel",
+    "plot_bsp_type_examples_from_excel",
+    "interactive_bsp_type_explorer_from_excel",
+    "plot_mature_bspoints_from_excel",
+    "plot_mature_bsp_quality_from_excel",
+    "load_virtual_bsp_backtest_data",
+    "default_virtual_bsp_strategy_config",
+    "run_virtual_bsp_simulation_from_excel",
     "prepare_simulation_data",
     "print_simulation_summary",
     "plot_delayed_bspoints",
